@@ -1,6 +1,6 @@
 /**
  * Bundle entry. `acon` imports this file as its panel module and calls the default export with its host;
- * the standalone shell imports `mountClient` and supplies its own host over the M1-b HTTP endpoints.
+ * the standalone page mounts this bundle with its HTTP host adapter.
  */
 
 import { createRoot } from "react-dom/client";

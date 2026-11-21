@@ -3,7 +3,7 @@
  *
  * `acon` supplies its `ConsoleHost` through `createAconHost`; the standalone shell supplies the same four
  * members over its HTTP endpoints. Nothing here knows about either transport, so a fake host runs the views
- * in tests and the standalone build until M1-b merges.
+ * in tests.
  */
 
 /** Query parameters carried by a panel navigation; the shell also keeps them in the URL. */

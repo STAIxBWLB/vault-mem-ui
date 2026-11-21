@@ -132,8 +132,17 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       const stops: (() => void)[] = [];
       if (host.subscribe) stops.push(host.subscribe((reply) => set({ reply, phase: "ready", error: undefined })));
       else {
-        const timer = setInterval(() => void store.refresh(), options.intervalMs ?? 5000);
-        stops.push(() => clearInterval(timer));
+        // A background tab must not keep a standalone server alive indefinitely.
+        const page = typeof document === "undefined" ? undefined : document;
+        let hidden = page?.hidden ?? false;
+        const timer = setInterval(() => { if (!page?.hidden) void store.refresh(); }, options.intervalMs ?? 5000);
+        const visibility = () => {
+          const wasHidden = hidden;
+          hidden = page?.hidden ?? false;
+          if (wasHidden && !hidden) void store.refresh();
+        };
+        page?.addEventListener("visibilitychange", visibility);
+        stops.push(() => { clearInterval(timer); page?.removeEventListener("visibilitychange", visibility); });
       }
       if (host.onTheme) stops.push(host.onTheme((theme) => set({ theme: resolveTheme(state.prefs.theme, theme) })));
       return () => {

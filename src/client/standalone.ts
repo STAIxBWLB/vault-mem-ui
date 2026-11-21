@@ -6,13 +6,18 @@ export function createStandaloneHost(mount: HTMLElement, request: (url: string, 
   const theme = (): Theme => ({ mode: media?.matches ? "dark" : "light" });
 
   async function post(endpoint: "/api/snapshot" | "/api/action", input: SnapshotInput | ActionInput): Promise<Record<string, unknown>> {
-    const response = await request(endpoint, {
+    let response: Response;
+    try {
+      response = await request(endpoint, {
       method: "POST",
       credentials: "same-origin",
       mode: "same-origin",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(input),
-    });
+        body: JSON.stringify(input),
+      });
+    } catch {
+      throw new Error("The vmem-ui server may have stopped; restart vmem-ui and open its new sign-in link");
+    }
     const data: unknown = await response.json().catch(() => null);
     if (!response.ok) {
       const message = data && typeof data === "object" && "error" in data && typeof data.error === "string"

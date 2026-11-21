@@ -17,7 +17,7 @@ const SESSION_MS = 12 * 60 * 60_000;
 const MAX_TICKETS = 16;
 
 export interface ClientAssets {
-  /** The client bundle (M1-a build output); a placeholder until the client lands. */
+  /** The built standalone client module and stylesheet. */
   js: string;
   css: string;
 }

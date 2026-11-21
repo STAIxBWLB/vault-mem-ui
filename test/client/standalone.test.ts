@@ -41,3 +41,8 @@ test("standalone host relays snapshots and a preview followed by the person's co
     await server.stop();
   }
 });
+
+test("a stopped server gives a restart and sign-in next step", async () => {
+  const host = createStandaloneHost({} as HTMLElement, async () => { throw new TypeError("connection failed"); });
+  await expect(host.snapshot({ panel: "overview" })).rejects.toThrow("restart vmem-ui and open its new sign-in link");
+});
