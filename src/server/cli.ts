@@ -67,6 +67,7 @@ export async function run(options: RunOptions): Promise<Host | null> {
   try {
     host = startHost({
       provider: graphProvider(provider), manifest: withGraphPanel(plugin.manifest), assets: options.assets, port: parsed.port, idleMs: parsed.idleMs,
+      log: (line) => options.err(line),
       onIdle: () => {
         options.out(`vmem-ui: no requests for ${parsed.idleMs / 60_000} minutes; stopped. Run vmem-ui again to reopen.`);
         options.exit(0);
