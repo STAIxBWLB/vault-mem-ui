@@ -140,7 +140,8 @@
 .vmem-input:focus-visible,
 .vmem-button:focus-visible,
 .vmem-row:focus-visible,
-.vmem-nav-item:focus-visible {
+.vmem-nav-item:focus-visible,
+.vmem-md-wiki:focus-visible {
   outline: 2px solid var(--vmem-accent);
   outline-offset: 2px;
 }
@@ -371,17 +372,154 @@
   gap: var(--vmem-space-2);
 }
 
-.vmem-body {
+.vmem-md {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-2);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.vmem-md-h,
+.vmem-md-p,
+.vmem-md-list,
+.vmem-md-quote,
+.vmem-md-pre,
+.vmem-md-scroll,
+.vmem-md-rule {
   margin: 0;
+}
+
+.vmem-md-h {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.vmem-md-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 20px;
+}
+
+.vmem-md-list .vmem-md-list {
+  margin-top: 4px;
+}
+
+.vmem-md-task {
+  list-style: none;
+  margin-left: -20px;
+}
+
+.vmem-md-check {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+}
+
+.vmem-md-code {
+  padding: 0 4px;
+  border: 1px solid var(--vmem-line);
+  border-radius: 4px;
+  background: var(--vmem-surface);
+  font-family: var(--vmem-mono);
+  font-size: 12px;
+}
+
+.vmem-md-pre {
   padding: var(--vmem-space-3);
   max-height: 60vh;
   overflow: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  background: var(--vmem-surface);
   border: 1px solid var(--vmem-line);
   border-radius: var(--vmem-radius);
-  font: 13px/1.5 var(--vmem-mono);
+  background: var(--vmem-surface);
+}
+
+.vmem-md-pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--vmem-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.vmem-md-quote {
+  padding-left: var(--vmem-space-3);
+  border-left: 3px solid var(--vmem-line-2);
+  color: var(--vmem-text-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-md-scroll {
+  overflow-x: auto;
+}
+
+.vmem-md-table {
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.vmem-md-cell {
+  padding: 4px 8px;
+  border: 1px solid var(--vmem-line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.vmem-md-cell[data-align="center"] {
+  text-align: center;
+}
+
+.vmem-md-cell[data-align="right"] {
+  text-align: right;
+}
+
+.vmem-md-rule {
+  border: 0;
+  border-top: 1px solid var(--vmem-line);
+}
+
+.vmem-md-link {
+  color: var(--vmem-accent);
+  text-decoration: underline;
+}
+
+.vmem-md-wiki {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--vmem-accent);
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* An embed cannot be shown here, because the panel fetches nothing else; the link says so with a broken underline. */
+.vmem-md-wiki-embed {
+  text-decoration: underline dashed;
+}
+
+.vmem-md-wiki-missing {
+  color: var(--vmem-danger);
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
+.vmem-md-image,
+.vmem-md-image-alt,
+.vmem-md-image-src {
+  color: var(--vmem-text-2);
+  font-family: var(--vmem-mono);
+  font-size: 12px;
+}
+
+.vmem-md-image-alt {
+  margin-right: 4px;
 }
 
 .vmem-dialog-backdrop {
