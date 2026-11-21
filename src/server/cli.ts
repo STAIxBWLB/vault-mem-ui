@@ -82,8 +82,16 @@ export async function run(options: RunOptions): Promise<Host | null> {
   return host;
 }
 
-/** The one shutdown path: close the host (and with it the provider), then exit. Signals and the idle exit both use it. */
-export async function shutdown(host: Host, exit: (code: number) => void): Promise<void> {
-  await host.close();
-  exit(0);
+/**
+ * The one shutdown path: close the host (and with it the provider), then exit. Signals and the idle exit both use it,
+ * so a close that fails is reported and still ends the process rather than leaving it running with no server.
+ */
+export async function shutdown(host: Host, exit: (code: number) => void, log: (line: string) => void = () => {}): Promise<void> {
+  try {
+    await host.close();
+    exit(0);
+  } catch (error) {
+    log(`vmem-ui: could not close the vault-mem provider: ${error instanceof Error ? error.message : String(error)}; exiting anyway`);
+    exit(1);
+  }
 }

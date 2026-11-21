@@ -341,6 +341,62 @@ test("the idle exit takes the same close path, so the provider is closed there t
   expect(closes).toBe(1);
 });
 
+test("concurrent closes share one in-flight close, so neither caller returns early", async () => {
+  const events: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { calls++; events.push("close start"); await gate; events.push("close end"); } };
+  const { host } = start({ provider });
+  const first = host.close().then(() => events.push("first returned"));
+  const second = host.close().then(() => events.push("second returned"));
+  await Bun.sleep(0);
+  // Both callers are still waiting on the one close that the provider is holding.
+  expect(events).toEqual(["close start"]);
+  release();
+  await Promise.all([first, second]);
+  expect(calls).toBe(1);
+  expect(events).toEqual(["close start", "close end", "first returned", "second returned"]);
+});
+
+test("a second signal cannot exit before the provider has closed", async () => {
+  const events: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { await gate; events.push("provider closed"); } };
+  const { host } = start({ provider });
+  const exit = (code: number) => events.push(`exit ${code}`);
+  const first = shutdown(host, exit);
+  const second = shutdown(host, exit);
+  await Bun.sleep(0);
+  expect(events).toEqual([]);
+  release();
+  await Promise.all([first, second]);
+  expect(events).toEqual(["provider closed", "exit 0", "exit 0"]);
+});
+
+test("a close that fails is reported and exits non-zero, and a concurrent caller sees the same failure", async () => {
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { throw new Error("index is locked"); } };
+  const { host } = start({ provider });
+  const logged: string[] = [];
+  const exits: number[] = [];
+  await shutdown(host, (code) => exits.push(code), (line) => logged.push(line));
+  expect(exits).toEqual([1]);
+  expect(logged).toEqual(["vmem-ui: could not close the vault-mem provider: index is locked; exiting anyway"]);
+  // The failed close is the one close: a later caller gets its rejection rather than a silent success.
+  await expect(host.close()).rejects.toThrow("index is locked");
+});
+
+test("a failed close on the idle exit is reported and the command still stops", async () => {
+  const logged: string[] = [];
+  let idled = 0;
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { throw new Error("index is locked"); } };
+  start({ provider, idleMs: 60, onIdle: () => { idled++; }, log: (line) => logged.push(line) });
+  await Bun.sleep(300);
+  expect(idled).toBe(1);
+  expect(logged).toEqual(["vmem-ui: could not close the vault-mem provider: index is locked; stopping anyway"]);
+});
+
 test("bin reads only this package's two dist files", async () => {
   const source = await Bun.file(new URL("../../bin/vmem-ui.ts", import.meta.url)).text();
   // Both signals take the same close path as the idle exit, so the provider is closed on Ctrl-C too.

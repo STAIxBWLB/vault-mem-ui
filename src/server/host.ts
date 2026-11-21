@@ -239,7 +239,14 @@ export function startHost(options: HostOptions): Host {
     timer = setTimeout(() => {
       if (stopped) return;
       if (now() - lastSeen < idleMs) return armIdle();
-      void close().then(() => options.onIdle?.());
+      // Both outcomes stop the process: the server is already down, so a failed close is reported and the exit happens.
+      void close().then(
+        () => options.onIdle?.(),
+        (error) => {
+          log(`vmem-ui: could not close the vault-mem provider: ${error instanceof Error ? error.message : String(error)}; stopping anyway`);
+          options.onIdle?.();
+        },
+      );
     }, Math.max(0, idleMs - (now() - lastSeen)));
   }
   armIdle();
@@ -253,12 +260,15 @@ export function startHost(options: HostOptions): Host {
     await server.stop(true);
   }
 
-  let closed = false;
-  async function close() {
-    if (closed) return;
-    closed = true;
-    await stop();
-    await provider.close?.();
+  // One close for the process: a second signal, or the idle timer racing a signal, awaits the promise already in
+  // flight instead of returning early and letting a caller exit while the provider is still closing.
+  let closing: Promise<void> | undefined;
+  function close(): Promise<void> {
+    closing ??= (async () => {
+      await stop();
+      await provider.close?.();
+    })();
+    return closing;
   }
 
   return {

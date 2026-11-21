@@ -20,7 +20,7 @@ if (import.meta.main) {
   const host = await run({ assets, argv: process.argv.slice(2), env: process.env, out: console.log, err: console.error, exit: (c) => process.exit(c) });
   if (!host) process.exit(process.argv.includes("--help") || process.argv.includes("-h") ? 0 : 2);
   // Ctrl-C and a termination request go through the same close as the idle exit: the provider is closed either way.
-  const stop = () => void shutdown(host, (code) => process.exit(code));
+  const stop = () => void shutdown(host, (code) => process.exit(code), console.error);
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
 }
