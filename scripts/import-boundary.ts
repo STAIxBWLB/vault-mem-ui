@@ -4,9 +4,15 @@ import ts from "typescript";
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const violations: string[] = [];
+  // The console takes panel assets as strings, so exactly one source file reads this package's own build output.
+  // It is the only exception, it may import `node:fs` alone, and it never names a vault path.
+  const assetReader = /(?:^|[\\/])src[\\/]plugin[\\/]assets\.ts$/.test(filename);
   const reject = (cause: string) => violations.push(`${filename}: ${cause} is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)`);
   const checkSpecifier = (specifier: string) => {
-    if (/^(?:node:)?(?:fs(?:\/|$)|child_process(?:\/|$))/.test(specifier) || specifier === "bun:sqlite") reject(`import ${specifier}`);
+    const childProcess = /^(?:node:)?child_process(?:\/|$)/.test(specifier);
+    const fileSystem = /^(?:node:)?fs(?:\/|$)/.test(specifier);
+    if (childProcess || (fileSystem && !(assetReader && /^(?:node:)?fs$/.test(specifier)))) reject(`import ${specifier}`);
+    if (specifier === "bun:sqlite") reject(`import ${specifier}`);
     if (specifier.startsWith("@staix/vault-mem/") && specifier !== "@staix/vault-mem/ui-plugin") reject("vault-mem internal import");
     if (/vault-mem[\\/](?:src|dist|lib)[\\/]/.test(specifier)) reject("vault-mem internal path");
   };

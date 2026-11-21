@@ -4,9 +4,21 @@ Web UI for [vmem](https://github.com/STAIxBWLB/vault-mem): a standalone browser 
 
 ## Status
 
-Not implemented or published yet. The repository contains the package scaffold, checks and the standalone host command; the panel UI and console plugin are still to come. The design is tracked in this repository's issues.
+Not published yet. The repository contains the package scaffold, checks, standalone host command, client panels and `acon` console plugin. The standalone client integration is still to come; the design is tracked in this repository's issues.
 
 For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run check`.
+
+## Client
+
+`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint and log. It is written against one small host interface and runs in both hosts from the same bundle.
+
+- Host interface (`src/client/host.ts`): `snapshot`, `action`, `theme` and `mount`. `acon`'s `ConsoleHost` is adapted by `createAconHost`; the standalone shell supplies the same members over its HTTP endpoints (M1-b), and `createFakeHost` stands in until that lands.
+- Writes go through `action` only. A write is previewed with its fingerprint and the planned changes, and nothing is sent until the person confirms; the confirm re-sends that same fingerprint, so the client cannot confirm a preview it did not show.
+- Per-viewer preferences (theme and last panel) live in `localStorage` behind a guarded wrapper: when storage is unavailable or full the panel still works, and the preference applies to the session only.
+- Keyboard: arrow keys, Home and End move through a list, Enter or Space opens the row, `/` focuses search and `Escape` closes the write dialog. Reduced motion follows `prefers-reduced-motion`, and the toolbar switch turns it on manually.
+- Panel rule: the build emits one ES module (`dist/panel.js`) and one stylesheet (`dist/panel.css`), with no inline script, no inline style markup, no `innerHTML` with data and no other origin. Colour comes from acon's `--acon-*` tokens, with fallbacks and a light/dark override for the standalone host.
+
+The `acon` plugin in `src/plugin` keeps `@staix/vault-mem/ui-plugin`'s provider — and so vmem's validation, receipts and two-step confirmation — and replaces only the panel assets with this bundle. It reads `dist/`, so run `bun run build` before starting the console; `bun run check` builds first for the same reason.
 
 ## Scope
 
