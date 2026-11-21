@@ -517,6 +517,17 @@
   cursor: help;
 }
 
+/* The reason a link is not followed, for a screen reader: a span cannot take focus, so the words behind the tooltip are
+   also rendered here and tied to the link by aria-describedby. */
+.vmem-md-note {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .vmem-md-image,
 .vmem-md-image-alt,
 .vmem-md-image-src {
