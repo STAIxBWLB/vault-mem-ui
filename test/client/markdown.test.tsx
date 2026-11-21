@@ -386,6 +386,22 @@ describe("images are described, never fetched", () => {
     expect(markup).not.toMatch(/<a[\s>]/);
     expect(markup).toContain("javascript:alert(1)");
   });
+
+  test("a label holds no second anchor and no button, because an anchor cannot hold either", () => {
+    // A badge written as an image inside a link is the shape that used to nest one anchor in another.
+    const badge = html("[![alt](https://example.test/image)](https://example.test/)");
+    expect(badge.match(/<a[\s>]/g)?.length ?? 0).toBe(1);
+    expect(badge).toContain('href="https://example.test/"');
+    expect(badge).toContain("alt");
+    expect(badge).toContain("https://example.test/image");
+    expect(badge).not.toContain('href="https://example.test/image"');
+
+    // An embed inside a link is a button in the old reading, which is a second focusable target inside the first.
+    const embed = html("[![[Beta]]](https://example.test/)", links);
+    expect(embed.match(/<a[\s>]/g)?.length ?? 0).toBe(1);
+    expect(embed.match(/<button/g)?.length ?? 0).toBe(0);
+    expect(embed).toContain("Beta");
+  });
 });
 
 describe("no client source can build markup", () => {
@@ -432,7 +448,7 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
     ]);
     expect({ built: built.exitCode, err: built.stderr.toString().slice(0, 300) }).toEqual({ built: 0, err: "" });
     const script = [
-      `const { parseMarkdown } = await import(${JSON.stringify(out)});`,
+      `const { parseInline, parseMarkdown } = await import(${JSON.stringify(out)});`,
       'for (const text of ["- ".repeat(5000) + "x", ">".repeat(5000) + "x"]) {',
       "  const blocks = parseMarkdown(text);",
       '  if (!blocks.length) throw new Error("no blocks");',
@@ -443,6 +459,11 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       "const blocks = parseMarkdown(nested);",
       'if (!blocks.length) throw new Error("no blocks");',
       'if (Date.now() - start > 2000) throw new Error("nested labels took " + (Date.now() - start) + " ms");',
+      // And the partial-bracket case measured here: 218 ms at 16k, 678 ms at 32k, 1.9 s at 48k before the pairing pass.
+      'const partial = "[".repeat(48000) + "]";',
+      "const before = Date.now();",
+      "parseInline(partial);",
+      'if (Date.now() - before > 1000) throw new Error("one close took " + (Date.now() - before) + " ms");',
       'console.log("ok");',
     ].join("\n");
     const run = Bun.spawnSync([Bun.which("node")!, "--input-type=module", "-e", script]);
@@ -509,6 +530,22 @@ describe("a pathological note takes bounded work", () => {
     });
     expect({ length: source.length, nodes }).toEqual({ length: 64 * 1024, nodes: 1 });
     expect({ under: ms < 1000 }).toEqual({ under: true });
+  });
+
+  test("a run of openings with one close at the end is a lookup per opening, not a scan", () => {
+    // The guard above only helped when no `]` existed at all: with a single close at the end every opening rescanned the
+    // same tail, which took 218 ms at 16k, 678 ms at 32k and 1.9 s at 48k under V8. Pairing the brackets once makes
+    // each opening a table lookup.
+    for (const size of [48 * 1024, 64 * 1024]) {
+      const source = "[".repeat(size) + "]";
+      let nodes = 0;
+      const ms = took(() => {
+        nodes = parseInline(source).length;
+      });
+      expect({ size, nodes }).toEqual({ size, nodes: 1 });
+      expect({ size, kept: html(source).includes(source) }).toEqual({ size, kept: true });
+      expect({ size, under: ms < 1000 }).toEqual({ size, under: true });
+    }
   });
 });
 
