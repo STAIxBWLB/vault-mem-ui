@@ -50,6 +50,15 @@ const WORD = /[\p{L}\p{N}]/u;
 /** The schemes an external link may use. Anything else, including a relative target, stays text. */
 const ALLOWED_SCHEMES = new Set(["http:", "https:", "mailto:"]);
 
+/**
+ * How deep nesting is followed. Both passes recurse once per level, and a 6 KB note of `- ` or `>` repeats is well
+ * inside the provider's 16 KiB body limit, so an unbounded walk overflows the browser stack and the panel has no error
+ * boundary to catch it. Past the cap the source is kept as text instead of interpreted, so the bytes still reach the
+ * person and nothing recurses further.
+ */
+export const MAX_BLOCK_DEPTH = 32;
+export const MAX_INLINE_DEPTH = 32;
+
 /** The href for a target only when it is an absolute http, https or mailto URL; `null` for everything else. */
 export function safeHref(value: string): string | null {
   const trimmed = value.trim();
@@ -63,10 +72,14 @@ export function safeHref(value: string): string | null {
 }
 
 export function parseMarkdown(text: string): Block[] {
-  return parseBlocks(text.replace(/\r\n?/g, "\n").split("\n"));
+  return parseBlocks(text.replace(/\r\n?/g, "\n").split("\n"), 0);
 }
 
-function parseBlocks(lines: string[]): Block[] {
+function parseBlocks(lines: string[], depth: number): Block[] {
+  if (depth >= MAX_BLOCK_DEPTH) {
+    const text = lines.join("\n").trim();
+    return text ? [{ kind: "paragraph", children: [{ kind: "text", text }] }] : [];
+  }
   const blocks: Block[] = [];
   let at = 0;
   while (at < lines.length) {
@@ -127,13 +140,13 @@ function parseBlocks(lines: string[]): Block[] {
         }
         break;
       }
-      blocks.push({ kind: "quote", children: parseBlocks(inner) });
+      blocks.push({ kind: "quote", children: parseBlocks(inner, depth + 1) });
       continue;
     }
 
     const head = listHead(line);
     if (head) {
-      at = parseList(lines, at, head, blocks);
+      at = parseList(lines, at, head, blocks, depth);
       continue;
     }
 
@@ -153,14 +166,14 @@ function parseBlocks(lines: string[]): Block[] {
 
     // A paragraph, or a setext heading when an underline follows its only line.
     const para: string[] = [];
-    let depth: number | null = null;
+    let setextDepth: number | null = null;
     while (at < lines.length) {
       const next = lines[at]!;
       if (!next.trim()) break;
       if (para.length) {
         const underline = SETEXT.exec(next);
         if (underline && para.length === 1) {
-          depth = underline[1]![0] === "=" ? 1 : 2;
+          setextDepth = underline[1]![0] === "=" ? 1 : 2;
           at += 1;
           break;
         }
@@ -170,7 +183,7 @@ function parseBlocks(lines: string[]): Block[] {
       at += 1;
     }
     const children = parseInline(para.join("\n"));
-    blocks.push(depth ? { kind: "heading", depth, children } : { kind: "paragraph", children });
+    blocks.push(setextDepth ? { kind: "heading", depth: setextDepth, children } : { kind: "paragraph", children });
   }
   return blocks;
 }
@@ -195,7 +208,7 @@ function listHead(line: string): Head | null {
   return null;
 }
 
-function parseList(lines: string[], start: number, first: Head, blocks: Block[]): number {
+function parseList(lines: string[], start: number, first: Head, blocks: Block[], depth: number): number {
   const items: ListItem[] = [];
   let at = start;
   while (at < lines.length) {
@@ -220,7 +233,7 @@ function parseList(lines: string[], start: number, first: Head, blocks: Block[])
       content.push(next.slice(head.indent));
       at += 1;
     }
-    items.push({ children: parseBlocks(content), checked });
+    items.push({ children: parseBlocks(content, depth + 1), checked });
   }
   blocks.push({ kind: "list", ordered: first.ordered, start: first.start, items });
   return at;
@@ -246,7 +259,9 @@ function splitRow(line: string): string[] {
   for (let at = 0; at < trimmed.length; at += 1) {
     const char = trimmed[at]!;
     if (char === "\\" && trimmed[at + 1] === "|") {
-      cell += "|";
+      // The escape stays in the cell: an inline pass turns `\|` into `|` where it is text, while a wiki-link target
+      // keeps the backslash exactly as vmem's own scan of the note reads it.
+      cell += "\\|";
       at += 1;
       continue;
     }
@@ -269,8 +284,10 @@ function cellAlign(delimiter: string): Align {
   return null;
 }
 
-export function parseInline(text: string): Inline[] {
+export function parseInline(text: string, depth = 0): Inline[] {
+  if (depth >= MAX_INLINE_DEPTH) return text ? [{ kind: "text", text }] : [];
   const out: Inline[] = [];
+  const delimiters = delimiterIndex(text);
   let buffer = "";
   const flush = () => {
     if (!buffer) return;
@@ -310,7 +327,7 @@ export function parseInline(text: string): Inline[] {
       }
     }
     if (char === "!" && text[at + 1] === "[") {
-      const span = wikiSpan(text, at) ?? bracketLink(text, at, true);
+      const span = wikiSpan(text, at) ?? bracketLink(text, at, true, depth);
       if (span) {
         flush();
         out.push(span.node);
@@ -319,7 +336,7 @@ export function parseInline(text: string): Inline[] {
       }
     }
     if (char === "[") {
-      const span = (text[at + 1] === "[" ? wikiSpan(text, at) : null) ?? bracketLink(text, at, false);
+      const span = (text[at + 1] === "[" ? wikiSpan(text, at) : null) ?? bracketLink(text, at, false, depth);
       if (span) {
         flush();
         out.push(span.node);
@@ -337,7 +354,7 @@ export function parseInline(text: string): Inline[] {
       }
     }
     if (char === "*" || char === "_") {
-      const span = emphasis(text, at);
+      const span = emphasis(text, at, delimiters, depth);
       if (span) {
         flush();
         out.push(span.node);
@@ -397,9 +414,9 @@ function wikiSpan(text: string, at: number): Span | null {
   return { node: { kind: "wiki", target, heading, block, label: alias || address, embed }, end: close + 2 };
 }
 
-function bracketLink(text: string, at: number, image: boolean): Span | null {
+function bracketLink(text: string, at: number, image: boolean, depth: number): Span | null {
   const open = at + (image ? 2 : 1);
-  let depth = 0;
+  let nested = 0;
   let cursor = open;
   for (; cursor < text.length; cursor += 1) {
     const char = text[cursor]!;
@@ -407,10 +424,10 @@ function bracketLink(text: string, at: number, image: boolean): Span | null {
       cursor += 1;
       continue;
     }
-    if (char === "[") depth += 1;
+    if (char === "[") nested += 1;
     else if (char === "]") {
-      if (!depth) break;
-      depth -= 1;
+      if (!nested) break;
+      nested -= 1;
     }
   }
   if (cursor >= text.length || text[cursor + 1] !== "(") return null;
@@ -446,7 +463,16 @@ function bracketLink(text: string, at: number, image: boolean): Span | null {
   if (image) return { node: { kind: "image", alt: label.trim(), src: target }, end: end + 1 };
   const href = safeHref(target);
   if (!href) return null;
-  return { node: { kind: "link", href, children: parseInline(label) }, end: end + 1 };
+  const children = parseInline(label, depth + 1);
+  // An anchor cannot hold an anchor, and the inline pass below would build one from the label: the inner link wins and
+  // this outer one stays the text it was, which is also what the scanner does when it reaches the inner link itself.
+  if (hasLink(children)) return null;
+  return { node: { kind: "link", href, children }, end: end + 1 };
+}
+
+function hasLink(nodes: Inline[]): boolean {
+  return nodes.some((node) => node.kind === "link" ||
+    ((node.kind === "strong" || node.kind === "em") && hasLink(node.children)));
 }
 
 /** The target of `[label](target "title")`, without the optional title. */
@@ -465,33 +491,78 @@ function autolink(text: string, at: number): Span | null {
   return { node: { kind: "link", href, children: [{ kind: "text", text: match[1]! }] }, end: at + match[0].length };
 }
 
-function emphasis(text: string, at: number): Span | null {
+interface Delimiters {
+  /** How many `char` characters start at `at`. */
+  runAt(at: number, char: string): number;
+  /** The first usable closing run at or after `from`, or -1 when the opener never closes. */
+  closeAt(from: number, char: string, width: number): number;
+}
+
+/**
+ * The `*` and `_` runs of one text, each read in a single pass. Without it every opener that never closes rescans the
+ * rest of the run, which is quadratic on a note that repeats `*a `; here the positions are computed once and each
+ * lookup is a binary search.
+ */
+function delimiterIndex(text: string): Delimiters {
+  const runs = new Map<string, Int32Array>();
+  const starts = new Map<string, number[]>();
+  const runAt = (at: number, char: string): number => {
+    let table = runs.get(char);
+    if (!table) {
+      table = new Int32Array(text.length + 1);
+      for (let index = text.length - 1; index >= 0; index -= 1) {
+        table[index] = text[index] === char ? table[index + 1]! + 1 : 0;
+      }
+      runs.set(char, table);
+    }
+    return table[at] ?? 0;
+  };
+  const usable = (found: number, char: string, width: number): boolean => {
+    const run = runAt(found, char);
+    const before = text[found - 1];
+    const after = text[found + run];
+    return before !== undefined && !/\s/.test(before) && run === width && !(char === "_" && after !== undefined && WORD.test(after));
+  };
+  const closeAt = (from: number, char: string, width: number): number => {
+    // An opener can start inside a longer run (`***a***`), where the run remaining from here is the one that counts.
+    if (text[from] === char && usable(from, char, width)) return from;
+    const key = `${char}\u0000${width}`;
+    let list = starts.get(key);
+    if (!list) {
+      list = [];
+      for (let at = 0; at < text.length; ) {
+        if (text[at] !== char) {
+          at += 1;
+          continue;
+        }
+        const run = runAt(at, char);
+        if (usable(at, char, width)) list.push(at);
+        at += run;
+      }
+      starts.set(key, list);
+    }
+    let low = 0;
+    let high = list.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (list[middle]! < from) low = middle + 1;
+      else high = middle;
+    }
+    return low < list.length ? list[low]! : -1;
+  };
+  return { runAt, closeAt };
+}
+
+function emphasis(text: string, at: number, delimiters: Delimiters, depth: number): Span | null {
   const char = text[at]!;
-  let run = 0;
-  while (text[at + run] === char) run += 1;
+  const run = delimiters.runAt(at, char);
   const width = Math.min(run, 2);
   const open = at + width;
   const first = text[open];
   if (!first || /\s/.test(first)) return null;
   if (char === "_" && at > 0 && WORD.test(text[at - 1]!)) return null;
-  const close = closingRun(text, open, char, width);
+  const close = delimiters.closeAt(open, char, width);
   if (close < 0) return null;
-  const children = parseInline(text.slice(open, close));
+  const children = parseInline(text.slice(open, close), depth + 1);
   return { node: width === 2 ? { kind: "strong", children } : { kind: "em", children }, end: close + width };
-}
-
-function closingRun(text: string, from: number, char: string, width: number): number {
-  let at = from;
-  while (at < text.length) {
-    const found = text.indexOf(char, at);
-    if (found < 0) return -1;
-    const before = text[found - 1];
-    let run = 0;
-    while (text[found + run] === char) run += 1;
-    const after = text[found + run];
-    const usable = before !== undefined && !/\s/.test(before) && run === width && !(char === "_" && after !== undefined && WORD.test(after));
-    if (usable) return found;
-    at = found + run;
-  }
-  return -1;
 }
