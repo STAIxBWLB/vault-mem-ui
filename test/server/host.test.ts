@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console/contract";
-import { CSP, startHost, type Host } from "../../src/server/host";
-import { parseArgs, run } from "../../src/server/cli";
+import { CSP, allowedPanels, loopback, startHost, type Host } from "../../src/server/host";
+import { parseArgs, run, shutdown } from "../../src/server/cli";
 import { boundaryViolations } from "../../scripts/import-boundary";
 
 // Synthetic provider: records every call so tests can prove the server relays and never confirms on its own.
@@ -194,14 +194,17 @@ test("write actions keep vmem's two-step confirmation: the server never confirms
   expect(missing.status).toBe(400);
 });
 
-test("provider failures name cause and next step", async () => {
+test("provider failures name cause and next step, and reach the terminal", async () => {
   const provider: ConsoleProvider = { assets: { js: "", css: "" }, async snapshot() { throw new Error("vault not found"); }, async action() { return { ok: false, error: "x" }; } };
-  const host = startHost({ provider, manifest, assets });
+  const logged: string[] = [];
+  const host = startHost({ provider, manifest, assets, log: (line) => logged.push(line) });
   hosts.push(host);
   const cookie = await signIn(host);
   const res = await post(host, "/api/snapshot", { panel: "overview" }, { cookie });
   expect(res.status).toBe(500);
   expect((await res.json()).error).toBe("the vault provider failed: vault not found; check the vmem-ui terminal and retry");
+  // The reply points at the terminal, so the cause is there, with the route it came from.
+  expect(logged).toEqual(["vmem-ui: POST /api/snapshot failed: vault not found"]);
 });
 
 test("unsupported methods and paths are refused with the next step", async () => {
@@ -235,6 +238,13 @@ test("provider initialization failure is reported with cause and next step, not 
   expect(errs).toEqual(["vmem-ui: could not open the vault-mem provider: VMEM_HOME must be an absolute path; check VMEM_HOME and AGENTHUB_HOME (absolute paths, readable vault registry), then run vmem-ui again"]);
 });
 
+test("--help names the vault home the command serves", async () => {
+  const out: string[] = [];
+  const host = await run({ assets, argv: ["--help"], env: {}, out: (line) => out.push(line), err: () => {}, exit: () => {} });
+  expect(host).toBeNull();
+  expect(out.join("\n")).toContain("VMEM_HOME");
+});
+
 test("command options refuse bad input with cause and next step", () => {
   expect(parseArgs([])).toEqual({ port: 0, idleMs: 30 * 60_000, help: false });
   expect(parseArgs(["--port", "8123", "--idle-minutes", "5"])).toEqual({ port: 8123, idleMs: 5 * 60_000, help: false });
@@ -243,8 +253,157 @@ test("command options refuse bad input with cause and next step", () => {
   expect(parseArgs(["--bogus"])).toEqual({ error: "unknown option --bogus; run vmem-ui --help for the options" });
 });
 
+test("a port is decimal digits only, so an empty, spaced, hex or fractional value is refused", () => {
+  const portError = (raw: string) => ({ error: `--port needs a port number from 0 to 65535; got ${raw === "" ? "nothing" : raw}` });
+  // Number("") is 0, Number("0x10") is 16 and Number(" 80 ") is 80: each used to be a valid port.
+  expect(parseArgs(["--port", ""])).toEqual(portError(""));
+  expect(parseArgs(["--port", "0x10"])).toEqual(portError("0x10"));
+  expect(parseArgs(["--port", " 80"])).toEqual(portError(" 80"));
+  expect(parseArgs(["--port", "8.5"])).toEqual(portError("8.5"));
+  expect(parseArgs(["--port", "-1"])).toEqual(portError("-1"));
+  expect(parseArgs(["--port"])).toEqual(portError(""));
+  expect(parseArgs(["--port", "0"])).toEqual({ port: 0, idleMs: 30 * 60_000, help: false });
+  expect(parseArgs(["--idle-minutes", ""])).toEqual({ error: "--idle-minutes needs a whole number of minutes, 1 or more; got nothing" });
+});
+
+test("a default port is checked without the :80 no browser sends", () => {
+  expect(loopback(80)).toEqual({ origin: "http://127.0.0.1", hosts: ["127.0.0.1", "localhost"], origins: ["http://127.0.0.1", "http://localhost"] });
+  const picked = loopback(8123);
+  expect(picked.origin).toBe("http://127.0.0.1:8123");
+  expect(picked.hosts).toEqual(["127.0.0.1:8123", "localhost:8123"]);
+  expect(picked.origins).toEqual(["http://127.0.0.1:8123", "http://localhost:8123"]);
+});
+
+test("panels come from the manifest, with inbox and search only where the plugin advertises them", async () => {
+  const bare = start();
+  const cookie = await signIn(bare.host);
+  for (const panel of ["inbox", "search"]) {
+    const res = await post(bare.host, "/api/snapshot", { panel }, { cookie });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain(`unknown panel "${panel}"; use one of overview`);
+  }
+  expect(bare.calls).toEqual([]);
+
+  const withCapabilities = start({ manifest: { ...manifest, capabilities: { inbox: true, search: true } } });
+  const studioCookie = await signIn(withCapabilities.host);
+  for (const panel of ["inbox", "search"]) {
+    expect((await post(withCapabilities.host, "/api/snapshot", { panel }, { cookie: studioCookie })).status).toBe(200);
+  }
+  expect([...allowedPanels({ ...manifest, capabilities: { search: true } })]).toEqual(["overview", "search"]);
+});
+
+test("the snapshot cursor must be a whole number of items already held", async () => {
+  const { host, calls } = start();
+  const cookie = await signIn(host);
+  for (const after of [1.5, -1, Number.MAX_SAFE_INTEGER + 2, "3"]) {
+    const res = await post(host, "/api/snapshot", { panel: "overview", after }, { cookie });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toContain('"after" must be how many items you already have, as a whole number 0 or more');
+  }
+  expect(calls).toEqual([]);
+  expect((await post(host, "/api/snapshot", { panel: "overview" }, { cookie })).status).toBe(200);
+  expect(calls).toEqual([{ kind: "snapshot", input: { panel: "overview", after: 0 } }]);
+});
+
+test("only the exact JSON media type is accepted", async () => {
+  const { host, calls } = start();
+  const cookie = await signIn(host);
+  for (const type of ["application/jsonx", "text/json", "application/json-patch+json", ""]) {
+    const res = await post(host, "/api/snapshot", { panel: "overview" }, { cookie, "content-type": type });
+    expect(res.status).toBe(415);
+    expect((await res.json()).error).toBe("request body must be JSON; send it with Content-Type: application/json");
+  }
+  expect(calls).toEqual([]);
+  // Parameters after the media type are still JSON, and a media type is case-insensitive.
+  expect((await post(host, "/api/snapshot", { panel: "overview" }, { cookie, "content-type": "application/json; charset=utf-8" })).status).toBe(200);
+  expect((await post(host, "/api/snapshot", { panel: "overview" }, { cookie, "content-type": "Application/JSON" })).status).toBe(200);
+  expect(calls).toHaveLength(2);
+});
+
+test("closing the host closes the provider once, on a signal and on the idle exit alike", async () => {
+  const order: string[] = [];
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { order.push("close"); } };
+  const { host } = start({ provider });
+  await shutdown(host, (code) => order.push(`exit ${code}`));
+  expect(order).toEqual(["close", "exit 0"]);
+  await host.close();
+  expect(order).toEqual(["close", "exit 0"]);
+  await expect(fetch(host.origin + "/", { signal: AbortSignal.timeout(1000) })).rejects.toThrow();
+});
+
+test("the idle exit takes the same close path, so the provider is closed there too", async () => {
+  let closes = 0;
+  let idled = 0;
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { closes++; } };
+  start({ provider, idleMs: 60, onIdle: () => { idled++; } });
+  await Bun.sleep(300);
+  expect(idled).toBe(1);
+  expect(closes).toBe(1);
+});
+
+test("concurrent closes share one in-flight close, so neither caller returns early", async () => {
+  const events: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { calls++; events.push("close start"); await gate; events.push("close end"); } };
+  const { host } = start({ provider });
+  const first = host.close().then(() => events.push("first returned"));
+  const second = host.close().then(() => events.push("second returned"));
+  await Bun.sleep(0);
+  // Both callers are still waiting on the one close that the provider is holding.
+  expect(events).toEqual(["close start"]);
+  release();
+  await Promise.all([first, second]);
+  expect(calls).toBe(1);
+  expect(events).toEqual(["close start", "close end", "first returned", "second returned"]);
+});
+
+test("a second signal cannot exit before the provider has closed", async () => {
+  const events: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { await gate; events.push("provider closed"); } };
+  const { host } = start({ provider });
+  const exit = (code: number) => events.push(`exit ${code}`);
+  const first = shutdown(host, exit);
+  const second = shutdown(host, exit);
+  await Bun.sleep(0);
+  expect(events).toEqual([]);
+  release();
+  await Promise.all([first, second]);
+  expect(events).toEqual(["provider closed", "exit 0", "exit 0"]);
+});
+
+test("a close that fails is reported and exits non-zero, and a concurrent caller sees the same failure", async () => {
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { throw new Error("index is locked"); } };
+  const { host } = start({ provider });
+  const logged: string[] = [];
+  const exits: number[] = [];
+  await shutdown(host, (code) => exits.push(code), (line) => logged.push(line));
+  expect(exits).toEqual([1]);
+  expect(logged).toEqual(["vmem-ui: could not close the vault-mem provider: index is locked; exiting anyway"]);
+  // The failed close is the one close: a later caller gets its rejection rather than a silent success.
+  await expect(host.close()).rejects.toThrow("index is locked");
+});
+
+test("a failed close on the idle exit is reported and the command still stops", async () => {
+  const logged: string[] = [];
+  let idled = 0;
+  const provider: ConsoleProvider = { ...fakeProvider([]), async close() { throw new Error("index is locked"); } };
+  start({ provider, idleMs: 60, onIdle: () => { idled++; }, log: (line) => logged.push(line) });
+  await Bun.sleep(300);
+  expect(idled).toBe(1);
+  expect(logged).toEqual(["vmem-ui: could not close the vault-mem provider: index is locked; stopping anyway"]);
+});
+
 test("bin reads only this package's two dist files", async () => {
   const source = await Bun.file(new URL("../../bin/vmem-ui.ts", import.meta.url)).text();
+  // Both signals take the same close path as the idle exit, so the provider is closed on Ctrl-C too.
+  expect(source).toContain("shutdown(host,");
+  expect(source).toContain('process.on("SIGINT", stop)');
+  expect(source).toContain('process.on("SIGTERM", stop)');
+  expect(source).not.toContain("host.stop(");
   // The only boundary finding allowed in bin is Bun.file, and only on the fixed CLIENT_FILES URLs.
   const findings = boundaryViolations(source, "bin/vmem-ui.ts");
   expect(findings.every((f) => f.includes("Bun.file"))).toBe(true);

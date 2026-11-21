@@ -30,7 +30,9 @@ export interface HostOptions {
   port?: number;
   idleMs?: number;
   maxBodyBytes?: number;
-  /** Runs once after the idle stop; the command closes the provider and exits here. */
+  /** Where a provider failure is reported; the 500 reply points the person at these lines. Defaults to stderr. */
+  log?: (line: string) => void;
+  /** Runs once after the idle close; the command exits here. */
   onIdle?: () => void;
   now?: () => number;
 }
@@ -40,7 +42,28 @@ export interface Host {
   readonly port: number;
   /** A new one-time sign-in link, valid for 5 minutes. */
   issue(): string;
+  /** Stops serving. Keeps the provider open, so a caller that owns it can close it in its own order. */
   stop(): Promise<void>;
+  /** Stops serving, then closes the provider: one shutdown path for a signal and for the idle exit. */
+  close(): Promise<void>;
+}
+
+/**
+ * The loopback origin and the Host/Origin values a browser actually sends for it. A URL drops a default port, so
+ * `--port 80` is checked as `127.0.0.1` and `http://127.0.0.1` rather than the `:80` forms no browser sends.
+ */
+export function loopback(port: number): { origin: string; hosts: string[]; origins: string[] } {
+  const local = new URL(`http://127.0.0.1:${port}`);
+  const named = new URL(`http://localhost:${port}`);
+  return { origin: local.origin, hosts: [local.host, named.host], origins: [local.origin, named.origin] };
+}
+
+/** Panels the page may ask for: the manifest's own, plus inbox and search only where it advertises them. */
+export function allowedPanels(manifest: ConsolePanelManifest): Set<string> {
+  const panels = new Set(manifest.panels.map((panel) => panel.id));
+  if (manifest.capabilities?.inbox) panels.add("inbox");
+  if (manifest.capabilities?.search) panels.add("search");
+  return panels;
 }
 
 const BASE_HEADERS: Record<string, string> = {
@@ -71,7 +94,8 @@ export async function readJsonBody(req: Request, limit: number): Promise<Record<
   const declared = req.headers.get("content-length");
   const tooBig = `request body is over the ${limit} byte limit; send a smaller request`;
   if (declared !== null && Number(declared) > limit) throw new Refusal(413, tooBig);
-  if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("application/json")) {
+  // The exact media type: parameters are allowed (they follow the `;`), another JSON-shaped type is not.
+  if ((req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase() !== "application/json") {
     throw new Refusal(415, "request body must be JSON; send it with Content-Type: application/json");
   }
   const chunks: Uint8Array[] = [];
@@ -98,10 +122,11 @@ export function startHost(options: HostOptions): Host {
   const { provider, manifest, assets } = options;
   const idleMs = options.idleMs ?? DEFAULT_IDLE_MS;
   const maxBody = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  const log = options.log ?? ((line: string) => console.error(line));
   const now = options.now ?? Date.now;
   const tickets = new Map<string, number>();
   const sessions = new Map<string, number>();
-  const panels = new Set(manifest.panels.map((p) => p.id).concat(["inbox", "search"]));
+  const panels = allowedPanels(manifest);
   let lastSeen = now();
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -167,7 +192,10 @@ export function startHost(options: HostOptions): Host {
       if (url.pathname === "/api/snapshot") {
         const panel = typeof input.panel === "string" ? input.panel : "";
         if (!panels.has(panel)) return refuse(req, 400, `unknown panel "${panel}"; use one of ${[...panels].join(", ")}`);
-        const after = typeof input.after === "number" && Number.isFinite(input.after) ? input.after : 0;
+        const after = input.after ?? 0;
+        if (typeof after !== "number" || !Number.isSafeInteger(after) || after < 0) {
+          return refuse(req, 400, `"after" must be how many items you already have, as a whole number 0 or more; got ${JSON.stringify(input.after)}`);
+        }
         return json(200, await provider.snapshot({ ...input, panel, after }));
       }
       if (typeof input.action !== "string" || input.action === "") return refuse(req, 400, "action name missing; send {\"action\": \"<name>\", ...}");
@@ -192,14 +220,17 @@ export function startHost(options: HostOptions): Host {
       } catch (err) {
         if (err instanceof Refusal) return refuse(req, err.status, err.message);
         const message = err instanceof Error ? err.message : String(err);
+        // The reply names the terminal, so the terminal has to carry the cause and where it came from.
+        log(`vmem-ui: ${req.method} ${new URL(req.url).pathname} failed: ${message}`);
         return refuse(req, 500, `the vault provider failed: ${message}; check the vmem-ui terminal and retry`);
       }
     },
   });
   const port = server.port!;
-  const origin = `http://127.0.0.1:${port}`;
-  hosts = [`127.0.0.1:${port}`, `localhost:${port}`];
-  origins = [origin, `http://localhost:${port}`];
+  const bound = loopback(port);
+  const origin = bound.origin;
+  hosts = bound.hosts;
+  origins = bound.origins;
   cookieName = `vmem_ui_${port}`;
 
   function armIdle() {
@@ -208,7 +239,14 @@ export function startHost(options: HostOptions): Host {
     timer = setTimeout(() => {
       if (stopped) return;
       if (now() - lastSeen < idleMs) return armIdle();
-      void stop().then(() => options.onIdle?.());
+      // Both outcomes stop the process: the server is already down, so a failed close is reported and the exit happens.
+      void close().then(
+        () => options.onIdle?.(),
+        (error) => {
+          log(`vmem-ui: could not close the vault-mem provider: ${error instanceof Error ? error.message : String(error)}; stopping anyway`);
+          options.onIdle?.();
+        },
+      );
     }, Math.max(0, idleMs - (now() - lastSeen)));
   }
   armIdle();
@@ -222,6 +260,17 @@ export function startHost(options: HostOptions): Host {
     await server.stop(true);
   }
 
+  // One close for the process: a second signal, or the idle timer racing a signal, awaits the promise already in
+  // flight instead of returning early and letting a caller exit while the provider is still closing.
+  let closing: Promise<void> | undefined;
+  function close(): Promise<void> {
+    closing ??= (async () => {
+      await stop();
+      await provider.close?.();
+    })();
+    return closing;
+  }
+
   return {
     origin,
     port,
@@ -233,5 +282,6 @@ export function startHost(options: HostOptions): Host {
       return `${origin}/login?t=${ticket}`;
     },
     stop,
+    close,
   };
 }
