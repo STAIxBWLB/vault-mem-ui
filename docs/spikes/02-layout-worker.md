@@ -4,7 +4,7 @@
 
 **The tested main-thread fallback is not responsive enough for an interactive graph.** One iteration per animation frame still occupied a median 27.9 ms and p95 34.0 ms, above the 16.7 ms frame budget for 60 Hz, before rendering an interactive Sigma graph. A button click issued by Playwright during layout took 328-769 ms to complete, versus 30-35 ms after layout. Those end-to-end automation timings include Playwright overhead, but the contrast and frame delays support the conclusion for this machine and fixture. The fastest possible scheduling quantum here is already a whole iteration; yielding between iterations cannot interrupt it.
 
-**Re-measured without probe overhead (spike 2b, the Re-measurement section below): the numbers above are superseded, the conclusion is not.** A persistent-matrix loop with nothing else in the timed region costs a median 26.6 ms per iteration at 10,000 nodes / 30,000 edges and 24.8 ms at 100,000 edges, so iteration work alone exceeds the 16.7 ms budget at both sizes. Sigma's cheapest repaint path that also updates edge geometry adds 10.1 ms at 30,000 edges and 29.5 ms at 100,000, and a full refresh adds 12.9 ms and 53.3 ms. Matrix reuse is worth 0.7 ms, so the earlier 27.9 ms was inflated by the unused traversal and the position and displacement copies, not by the matrix rebuild. A free-running same-origin worker produced median frame intervals of 16-17 ms and median click actions of 1-2 ms, while its layout advances at 6-51 iterations per second, enough for a settling graph and not for 60 position updates per second. At 100,000 edges its batched repaint still costs 19-25 ms on the main thread, and 220-300 ms iteration bursts appear inside most worker runs. An earlier revision of that section measured a repaint path that never updated edge geometry; its rendering figures and its "cheap update" claim are withdrawn.
+**Re-measured without probe overhead (spike 2b, the Re-measurement section below): the numbers above are superseded, the conclusion is not.** A persistent-matrix loop with nothing else in the timed region costs a median 26.6 ms per iteration at 10,000 nodes / 30,000 edges and 24.8 ms at 100,000 edges, so iteration work alone exceeds the 16.7 ms budget at both sizes. Sigma's cheapest repaint path that also updates edge geometry adds 10.1 ms at 30,000 edges and 29.5 ms at 100,000, and a full refresh adds 12.9 ms and 53.3 ms. Matrix reuse is worth 0.7 ms, so the earlier 27.9 ms was inflated by the unused traversal and the position and displacement copies, not by the matrix rebuild. A free-running same-origin worker kept median frame intervals at 16.6-16.7 ms and median click actions at 1-2 ms, while its layout advanced at 5-50 iterations per second, enough for a settling graph and not for 60 position updates per second. That median frame applies nothing, so it is not what a batch costs: on the frames that do carry one (16% of frames at a 100 ms batch interval, 23-57% in the frame-capped 16 ms arms) the work took 0.1-0.4 ms without a repaint, 5.7-5.9 ms at 30,000 edges and 18.5-21.8 ms at 100,000 edges (p95 22.4-26.3 ms), which put the frame p95 at 17.8-19.4 ms at 30,000 edges and 20.1-23.6 ms at 100,000 in the rendering arms, and the worst frame at 36.6 ms. Iterations of 240-320 ms appear in 12 of 19 worker runs. An earlier revision of that section measured a repaint path that never updated edge geometry; its rendering figures and its "cheap update" claim are withdrawn.
 
 A same-origin module worker did start from acon's existing `panel.js` endpoint, while a `blob:` worker was blocked. A synthetic worker also ran 100 public API iterations while the page remained responsive, but this is not proof that the stock ForceAtlas2 worker supervisor can use that URL: version 0.10.1 creates its worker from a Blob. The proposed one-module contract and acon's actual available asset routes must be resolved for a supported worker integration. The task requests a draft for agent-console rather than a CSP workaround; that draft is below and has not been filed. No change to acon's CSP is implied by the same-origin result.
 
@@ -134,49 +134,65 @@ The panel module was started as its own module worker from the page:
 serves that URL and allows it. The worker builds the graph and matrices once, then runs
 iterations back to back in chunks of three, yielding between chunks through a `MessageChannel`,
 and posts two transferred `Float32Array`s when its batch interval has passed. The main thread
-writes the newest batch into the node attributes on each animation frame and, when rendering,
-performs the edges-correct Sigma repaint. Layout never blocks the main thread; the repaint does.
+checks each animation frame, writes the newest batch into the node attributes when one arrived
+and, when rendering, performs the edges-correct Sigma repaint. Layout never blocks the main
+thread; the batch does.
 
-Each row is three runs of 400 frames (about 6.7 s), stopped earlier if the movement proxy is
-reached. The two soak rows at the end are two runs of 3 s each. Per-run figures are separated
-by semicolons.
-"Frame work" is the median main-thread cost across all measured frames, including frames
-that receive no batch; it is not the cost of applying a batch. "Render" is the repaint cost
-measured only on frames that apply a batch. Both include timing overhead.
+Each row is three runs capped at 400 frames and stopped when the movement proxy has held for
+five batches; the windows measured here ran 173-363 frames (2.9-6.0 s). The two soak rows at the
+end are two runs of 3 s each. Per-run figures are separated by semicolons.
+Three measurements sit in the cost columns and they are not interchangeable. "Per-batch work" is
+the total main-thread cost of the frames that applied a batch, position write plus repaint;
+"render" is the Sigma repaint inside those same frames. "All-frame" is the median over every
+frame, including the ones that apply nothing, so it reads 0-0.1 ms and says how rare batches are
+rather than what one costs; the single 5.4 ms entry is the run where 57% of frames carried a
+batch. Frame intervals are rAF start-to-start gaps over all frames, so a batch appears in their
+tail rather than in their median. All figures include timing overhead.
 
-| arm | iterations in window | iteration p50 / p95 / max (ms), per run | frame p50 / p95 / max (ms), per run | all-frame work / per-batch render p50 (ms) | click p50 (n) | handler lag p50 (ms) | movement proxy |
-|---|---|---|---|---|---|---|---|
-| worker, no render, 10,000 / 30,000 | 114; 114; 114 | 26.4 / 40.7 / 242.7; 26.3 / 236.8 / 251.3; 26.3 / 238.3 / 255.5 | 16.7 / 17.5 / 30.9; 16.7 / 16.8 / 18.0; 16.7 / 16.8 / 19.2 | 0 / - | 1 (265) | 0.1 | iteration 112, 4.0-5.1 s |
-| worker, no render, 10,000 / 100,000 | 93; 93; 93 | 27.0 / 233.1 / 238.7; 24.9 / 34.4 / 44.2; 25.2 / 236.9 / 281.6 | 16.7 / 16.8 / 17.5; 16.7 / 16.8 / 16.9; 16.7 / 19.3 / 20.1 | 0 / - | 1 (217) | 0.1 | iteration 90, 2.3-5.6 s |
-| worker + Sigma nodes and edges, 16 ms batch, 10,000 / 30,000 | 114; 114; 114 | 26.6 / 37.3 / 240.2; 26.6 / 237.9 / 243.9; 28.0 / 236.7 / 288.7 | 16.5 / 19.7 / 20.2; 16.3 / 20.3 / 20.5; 16.0 / 20.4 / 20.6 | 0.1 / 5.2-6.0 | 1 (248) | 0.1 | iteration 112, 4.1-4.7 s |
-| worker + Sigma nodes and edges, 16 ms batch, 10,000 / 100,000 | 93; 93; 93 | 25.2 / 216.9 / 236.2; 24.6 / 218.6 / 231.3; 28.0 / 240.2 / 253.7 | 16.2 / 22.3 / 24.0; 16.7 / 21.5 / 24.6; 17.0 / 28.1 / 31.3 | 0.1 / 19.2-24.1 | 1 (194) | 0.1 | iteration 90, 3.2-5.6 s |
-| worker + Sigma nodes and edges, 100 ms batch, 10,000 / 100,000 | 102; 264; 270 | 27.5 / 283.1 / 306.3; 17.5 / 29.3 / 239.5; 17.5 / 28.0 / 39.5 | 16.7 / 24.8 / 37.1; 16.7 / 21.1 / 25.6; 16.7 / 21.0 / 24.3 | 0.1 / 19.7-25.0 | 1 (334) | 0.1 | iteration 261-266, 5.3-6.4 s (one run not reached, last 0.042) |
-| worker, 3 s soak, 10,000 / 30,000 | 90; 54 | 26.8 / 35.0 / 232.6; 27.2 / 247.4 / 257.3 | 16.7 / 17.7 / 18.6; 16.7 / 17.3 / 17.9 | 0 / - | 1 (114) | 0.1 | not reached in 3 s (last 0.013) |
-| worker, 3 s soak, 10,000 / 100,000 | 93; 18 | 24.9 / 33.4 / 39.9; 230.9 / 254.0 / 254.0 | 16.7 / 17.3 / 18.9; 16.7 / 17.7 / 18.8 | 0 / - | 1 (100) | 0.1 | iteration 90 at 2.2 s in the clean run, not reached in the burst run |
+| arm | iterations in window | iteration p50 / p95 / max (ms), per run | frame p50 / p95 / max (ms), per run | per-batch work p50 / p95 (ms), per run | all-frame p50 (ms) | click p50 (n) | handler lag p50 (ms) | movement proxy |
+|---|---|---|---|---|---|---|---|---|
+| worker, no render, 10,000 / 30,000 | 114; 114; 114 | 30.8 / 41.3 / 310.3; 26.4 / 283.3 / 311.3; 27.4 / 249.4 / 264.7 | 16.7 / 19.3 / 38.7; 16.7 / 19.4 / 22.8; 16.7 / 19.3 / 20.5 | 0.1 / 0.3; 0.1 / 0.1; 0.1 / 0.2 | 0; 0; 0 | 2 (295) | 0.1 | iteration 112, 4.3-6.0 s |
+| worker, no render, 10,000 / 100,000 | 93; 93; 93 | 28.5 / 280.8 / 300.0; 25.9 / 256.1 / 271.5; 24.6 / 37.6 / 246.9 | 16.7 / 19.3 / 20.6; 16.7 / 18.8 / 20.4; 16.7 / 17.9 / 18.8 | 0.3 / 0.4; 0.1 / 0.2; 0.2 / 0.4 | 0; 0; 0 | 2 (228) | 0.1 | iteration 90, 2.9-5.7 s |
+| worker + Sigma nodes and edges, 16 ms batch, 10,000 / 30,000 | 114; 114; 114 | 27.0 / 33.9 / 39.6; 27.0 / 34.1 / 252.8; 26.6 / 252.6 / 268.8 | 16.7 / 18.1 / 19.9; 16.7 / 17.8 / 18.8; 16.7 / 17.8 / 18.5 | 5.9 / 6.7; 5.7 / 6.6; 5.7 / 6.6 | 5.4; 0; 0 | 1 (225) | 0.1 | iteration 112, 3.1-5.1 s |
+| worker + Sigma nodes and edges, 16 ms batch, 10,000 / 100,000 | 93; 93; 93 | 24.9 / 242.4 / 252.0; 25.3 / 240.6 / 261.6; 25.7 / 243.0 / 253.0 | 16.7 / 22.4 / 36.6; 16.7 / 22.5 / 30.9; 16.7 / 23.6 / 27.8 | 19.7 / 24.6; 20.8 / 24.8; 21.8 / 26.3 | 0; 0; 0 | 2 (225) | 0.1 | iteration 90, 3.8-5.1 s |
+| worker + Sigma nodes and edges, 100 ms batch, 10,000 / 100,000 | 267; 270; 264 | 17.5 / 28.2 / 43.4; 17.6 / 27.9 / 39.2; 17.6 / 28.8 / 39.9 | 16.6 / 20.1 / 33.4; 16.6 / 20.6 / 23.9; 16.7 / 20.5 / 24.1 | 18.5 / 22.4; 19.4 / 23.4; 18.8 / 23.0 | 0; 0; 0 | 1 (292) | 0.1 | iteration 261-266, 5.2-5.3 s |
+| worker, 3 s soak, 10,000 / 30,000 | 54; 15 | 29.4 / 243.1 / 245.2; 291.6 / 319.1 / 319.1 | 16.8 / 19.3 / 20.4; 16.7 / 19.3 / 20.3 | 0.2 / 0.3; 0.2 / 0.4 | 0; 0 | 2 (113) | 0.1 | not reached in 3 s (last 0.021; 0.040) |
+| worker, 3 s soak, 10,000 / 100,000 | 33; 78 | 36.8 / 308.7 / 321.8; 30.9 / 45.5 / 303.6 | 16.7 / 19.3 / 20.8; 16.6 / 19.5 / 20.8 | 0.4 / 0.7; 0.2 / 0.3 | 0; 0 | 2 (111) | 0.1 | not reached in 3 s (last 0.052; 0.012) |
 
 Worker initialisation, which builds the graph and the matrices from transferred arrays, took
-71-116 ms. Each position batch is 80,000 bytes, transferred rather than copied. With 25-27 ms
+71-120 ms. Each position batch is 80,000 bytes, transferred rather than copied. With 25-31 ms
 iterations the "16 ms" batch interval is bounded by the iteration, so those arms post about one
-batch per iteration; the 100 ms arm posts about five iterations per batch and lets the worker
-run at 40-50 iterations per second instead of 17-29.
+batch per iteration; the 100 ms arm posts about five iterations per batch and runs at 50
+iterations per second instead of 16-37.
 
-The median worker-arm frame interval is 16-17 ms and the median click action is about a millisecond,
-against 24.5-84.1 ms of handler lag and 181-610 ms of click action on the main thread. Layout
-throughput is the price: across runs it spans 6-51 iterations per second, with clean runs at
-20-30 under 16 ms batches and 40-51 under 100 ms batches, and a burst-stopped run as low as 5.
-The price of showing the result is
-a 5-6 ms repaint per batch at 30,000 edges but 19-25 ms at 100,000, which pushes the frame p95 to
-21-28 ms. Moving the layout off the main thread does not by itself make the 100,000-edge render
-frame-rate safe: the repaint has to be batched or kept off the frame path too.
+The median frame is 16.6-16.7 ms in every arm and the median click action is 1-2 ms, against
+24.5-84.1 ms of handler lag and 181-610 ms of click action on the main thread; the `pointerdown`
+handler runs 0.1 ms after the event in every worker arm. Those medians describe a page that is
+idle on most frames: in the frame-capped 16 ms arms 23-57% of frames apply a batch, and at 100 ms
+only 16% do. What an applied batch costs is the per-batch column: 0.1-0.4 ms for the position write
+alone, 5.7-5.9 ms with the edges-correct Sigma repaint at 30,000 edges, and 18.5-21.8 ms at
+100,000 edges with a p95 of 22.4-26.3 ms. The frame tails follow: p50 stays at 16.6-16.7 ms while
+p95 is 17.8-19.4 ms in the no-render and 30,000-edge rendering arms and 20.1-23.6 ms in the
+100,000-edge rendering arms. The worst frame in a window is 18.5-19.9 ms at 30,000 edges, 23.9-36.6
+ms at 100,000, and 38.7 ms in one no-render window, a stall that no batch in it explains.
+
+Throughput is the price. Across the 19 runs it spans 5-50 iterations per second: 16-37 under
+16 ms batches in the frame-capped arms, 5-26 in the 3 s soaks, and 50 under 100 ms batches.
+Batching is what keeps the median frame at 60 Hz. At 100,000 edges the 100 ms arm pays the same
+18.5-21.8 ms per applied batch as the 16 ms arm, but applies it on 16% of frames instead of
+23-29%. That is still not frame-rate safe at that size: the block shows in the p95 (20.1-20.6 ms)
+and in the worst frame (23.9-33.4 ms). Moving the layout off the main thread does not by itself
+make a 100,000-edge graph frame-rate safe; the repaint has to be cheaper or leave the frame path
+too.
 
 **A cost burst runs through the worker numbers.** In 12 of 19 worker runs some iterations jump
-from about 27 ms to 220-300 ms, mostly in bursts of a few consecutive iterations; when a run ends
-inside a burst, its own median is also 230-270 ms and it completes only 18 iterations in the
-window (that is the 18-iteration soak run, whose own median is 230.9 ms). Four candidate
-causes were checked and none explains it:
+from about 27 ms to 240-320 ms, mostly in bursts of a few consecutive iterations; in 11 of them
+the bursts are frequent enough to put the iteration p95 above 200 ms, and when a window ends
+inside one its own median is 230-292 ms and it completes very few iterations (the 15-iteration
+soak run has a 291.6 ms median). Four candidate causes were checked and none explains it:
 
 - Thread CPU throughput is the same: a 20-million-iteration floating-point probe took 10.7 ms
-  p50 on the main thread and 10.3-12.6 ms in the worker.
+  p50 on the main thread and 10.3-12.4 ms in the worker.
 - It is not timer throttling: the gap between iteration chunks stayed at 0.1-0.4 ms p50 (max
   6.1 ms) with both the `MessageChannel` and `setTimeout` yield styles.
 - It is not the worker heap limit: a run with `--js-flags=--max-old-space-size=4096` still
@@ -197,18 +213,20 @@ a settling time.
 - Removing the probe overhead and reusing matrices improves the figure by under a millisecond,
   so the earlier verdict was right for the wrong reason: the cost is the algorithm iteration
   itself, and no scheduling inside the iteration can cut it below a whole iteration.
-- A same-origin module worker produced 16-17 ms median frame intervals and about 1 ms median click actions; its
-  iteration cost sits inside the main thread's run-to-run spread: 26.3-28.0 ms p50 against
-  26.6 ms at 30,000 edges, and 24.6-28.0 ms against 24.8 ms at 100,000. The stock 0.10.1
+- A same-origin module worker kept median frame intervals at 16.6-16.7 ms and median click
+  actions at 1-2 ms; its iteration cost sits in the main thread's range: 26.4-30.8 ms p50
+  against 26.6 ms at 30,000 edges, and 24.6-28.5 ms against 24.8 ms at 100,000. The stock 0.10.1
   supervisor is still not usable because it creates its worker from a `blob:`. The same-origin
   panel-module worker is a route tested in the console's local host, and it is
   not available as things stand in the static multi-node host: there the panel module is served
   from the node origin with an `acon_resource` grant, so a worker started from that module is
   cross-origin to the page and loses the grant.
-- Showing worker results at 100,000 edges costs 19-25 ms of main-thread repaint per batch, so the
-  panel needs a batch cadence that fits the frame budget: 100 ms batches held frames at 16.7 ms
-  p50 (21-25 ms p95) and let the worker run at 40-50 iterations per second, while 16 ms batches
-  put a 20 ms block on every frame.
+- The median worker frame is cheap because it applies nothing. What the panel puts on the frame is
+  the batch: 0.1-0.4 ms alone, 5.7-5.9 ms at 30,000 edges and 18.5-21.8 ms at 100,000 edges
+  (p95 22.4-26.3 ms). At a 100 ms interval those blocks land on 16% of frames, which reads as
+  16.6 ms p50 with a 20.1-20.6 ms p95 and a 23.9-33.4 ms worst frame; at 16 ms they land on
+  23-29% and the p95 rises to 22.4-23.6 ms with a 27.8-36.6 ms worst frame. Batching buys the
+  median, not the tail: at 100,000 edges the repaint itself has to get cheaper.
 - The unexplained bursts mean the worker's throughput is not bounded by the p50. A production
   layout needs a soak test and probably a smaller allocation per iteration, or an explicit GC
   experiment, before the panel depends on a settling time.
@@ -225,7 +243,7 @@ rather than a quotation that can drift from it. Each piece the tables depend on:
 | position write-back | `spikes/02b/graph.js` | `writePositions(graph, matrix, stride)` with `stride = matrix.length / graph.order` |
 | main-thread arms and the edge-correctness instrumentation | `spikes/02b/panel.js` | `runMainCase`, `measureEdgeCorrectness`, `refreshSigma(sigma, graph, mode)` |
 | worker branch and protocol | `spikes/02b/panel.js` | the `typeof document === 'undefined'` branch: `init`, `start`, `stop`, `cpu` inbound; `boot`, `ready`, `batch`, `stopped`, `cpu`, `failure` outbound; `iterate` in chunks of three with a `MessageChannel` yield and one transferred batch per interval |
-| worker driver on the page | `spikes/02b/panel.js` | `runWorkerCase`: applies the newest batch in `requestAnimationFrame`, repaints, records apply and render cost |
+| worker driver on the page | `spikes/02b/panel.js` | `runWorkerCase`: applies the newest batch in `requestAnimationFrame`, repaints, and records per-frame work, per-batch work (frames that applied a batch) and repaint cost |
 | server | `spikes/02b/server.ts` | acon `startServer` with an in-memory plugin that serves `bundle.js` as `/p/spike2b/panel.js` |
 | measurement driver | `spikes/02b/measure.ts` | spawns the server, reads the ticket, loads the page once, routes by hash, clicks `#pulse` every 50 ms, writes `result.json` |
 | pinned dependencies | `spikes/02b/package.json`, `spikes/02b/bun.lock` | `bun install` |
@@ -258,11 +276,17 @@ revision (which left the Sigma arms drawing a still graph, and is why the first 
 section under-reported their cost), and worker runs that ended inside a cost burst were reported
 as if the burst were the median.
 
+The worker rows were measured again once the per-batch counter was added, so they come from a
+later run of the same arms than the first pass: the no-render 30,000-edge arm moved from
+26.3-26.4 ms p50 to 26.4-30.8 ms, and the soak rows reached the movement proxy in the earlier run
+but not in this one. Spread of that size between runs is why every table here gives per-run
+values instead of one number.
+
 An independent run of the same scratch copy by the reviewer measured a 29.2 ms p50 iteration on a
 20-iteration persistent 30,000-edge case and a 15.2 ms worker frame interval, alongside two 401s.
-The iteration figure is above this section's 26.3-27.2 ms per-run spread for that arm, and the
-frame figure is a slightly faster frame cadence than 16.7 ms; the 401s are the reload defect
-described above.
+That iteration figure is above this section's 26.6 ms p50 for the same arm, about a tenth slower
+and still far above the 16.7 ms budget; the frame figure is a slightly faster cadence than
+16.7 ms; the 401s are the reload defect described above.
 
 ## Draft for agent-console
 
@@ -272,12 +296,9 @@ described above.
 
 A graph panel needs to run ForceAtlas2 at 10,000 nodes without blocking the UI. Re-measured on 2026-11-21 (Chrome 159, ANGLE/Metal), one layout iteration in a persistent-matrix loop costs a median 26.6 ms at 30,000 edges and 24.8 ms at 100,000 edges on the main thread, before any rendering, and Sigma's cheapest repaint that also moves the edges adds another 10.1-29.5 ms. That is above the 16.7 ms frame budget, so the work has to leave the main thread. The library's own worker supervisor cannot help, because it creates its worker from a `blob:` that the console CSP blocks.
 
-A module worker started from the panel's own same-origin URL does work in the console. A synthetic run kept the page at 16-17 ms frames and about 1 ms click actions while the layout ran, and positions came back as two transferred `Float32Array`s (80,000 bytes per update at 10,000 nodes), with the layout advancing at 6-51 iterations per second. Showing those positions still costs the main thread 19-25 ms per repaint at 100,000 edges, so the panel will batch updates rather than repaint every frame. The console contract does not describe that route or its lifecycle.
+A module worker started from the panel's own same-origin URL was verified experimentally in the console's local host, not in every host the console supports. Under that host's CSP the panel module was served at `/p/<tool>/panel.js`, `new Worker(new URL('./panel.js', import.meta.url), {type: 'module'})` started from it, and a `blob:` worker stayed blocked. In that one setup a synthetic layout kept median frame intervals at 16.6-16.7 ms and median click actions at 1-2 ms while the layout ran, positions came back as two transferred `Float32Array`s (80,000 bytes per update at 10,000 nodes), and the layout advanced at 5-50 iterations per second. Those are this spike's numbers on this machine, not a promise about another host. Showing the positions costs the main thread 5.7-5.9 ms per batch at 30,000 edges and 18.5-21.8 ms at 100,000, where the frame p95 rises to 20.1-23.6 ms, so the panel will batch updates rather than repaint every frame. The console contract does not describe that route or its lifecycle.
 
-In the static multi-node host the same-origin property does not hold today: the panel module is
-served from the node origin with an `acon_resource` grant, so a worker started from that module
-is cross-origin to the page and loses the grant. The contract should say what a panel may do
-there, or state that the worker route is local-host only.
+In the static multi-node host the same-origin property does not hold today. That host does not serve the panel module itself: `shell/static.js` rewrites each panel asset URL to the node's own origin and appends the node's `acon_resource` grant, `shell/shell.js` imports the panel from that rewritten URL, and `src/server.ts` accepts the grant only for a GET on a panel or asset path whose request origin is absent or equal to the grant's origin. A worker created from `import.meta.url` in that module therefore resolves to the node origin while the page stays on the console origin, and what a worker gets there is decided by how the host serves a panel's module, which the contract does not state. That reading comes from acon at `8babe31`; only the local host was exercised here, so the static host's behaviour is expected from the code rather than measured.
 
 Please make the same-origin panel-module worker a supported contract. Document that a panel may start a module worker from its own asset URL, and define and test the rest of it: authentication in local and static multi-node hosts, MIME type, CSP, cache and version pinning, teardown and failure behaviour. Keeping the CSP restrictive and stating that `blob:` workers stay blocked are both fine for this request. The UI project will adapt its layout worker to the documented contract and test cancellation, throughput and data transfer.
 

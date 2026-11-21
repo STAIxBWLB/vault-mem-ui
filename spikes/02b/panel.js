@@ -311,6 +311,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
   const workerCounts = [];
   const workerBatchAt = [];
   const applyCosts = [];
+  const batchCosts = [];
   const renderCosts = [];
   worker.onmessageerror = () => {
     window.workerFailure = 'worker messageerror';
@@ -370,8 +371,10 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
     const frameStart = performance.now();
     frames.push(frameStart - prior);
     prior = frameStart;
+    let applied = false;
     if (latest && latestSeq !== appliedSeq) {
       appliedSeq = latestSeq;
+      applied = true;
       const x = latest.x;
       const y = latest.y;
       let n = 0;
@@ -387,6 +390,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
       }
     }
     applyCosts.push(performance.now() - frameStart);
+    if (applied) batchCosts.push(performance.now() - frameStart);
     if (workerDeltas.length >= PROXY_STREAK && workerDeltas.slice(-PROXY_STREAK).every((value) => value < PROXY_THRESHOLD)) break;
   }
   window.caseRunning = false;
@@ -414,6 +418,9 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
     yieldGapMs: workerGaps.length > 1 ? stats(workerGaps.slice(1)) : null,
     yieldMode,
     frameCostMs: stats(applyCosts),
+    batchFrameCostMs: batchCosts.length ? stats(batchCosts) : null,
+    batchFrames: batchCosts.length,
+    batchFrameShare: frames.length ? batchCosts.length / frames.length : 0,
     renderCostMs: renderCosts.length ? stats(renderCosts) : null,
     frameGapMs: stats(frames),
     framesMeasured: frames.length,
