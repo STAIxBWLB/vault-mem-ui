@@ -157,7 +157,8 @@ describe("readGraphInput", () => {
 });
 
 test("layout status labels name the cause and next step on failure", () => {
-  expect(layoutLabel({ kind: "error", message: "boom" })).toContain("Reload the panel");
+  const message = "graph layout stopped: boom; reload the graph to restart the layout, or keep the cached positions";
+  expect(layoutLabel({ kind: "error", message })).toBe(message); // shown once, as the worker phrased it
   expect(layoutLabel({ kind: "cached-only", reason: "live layout is unavailable: x" })).toContain("unavailable");
   expect(layoutLabel({ kind: "settled", iterations: 12 })).toContain("12");
 });

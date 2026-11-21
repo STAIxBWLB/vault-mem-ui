@@ -171,6 +171,92 @@ describe("GraphPanel", () => {
     expect(darkEdge).not.toBe(lightEdge);
   });
 
+  test("pause then resume returns to running, so the button flips back and LOD-during-layout applies again", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    await mount({ graph });
+    const worker = FakeWorker.last!;
+    await act(async () => { worker.emit({ type: "ready" } as FromWorker); });
+    await flush();
+    const button = (label: string) => [...container.querySelectorAll("button")].find((b) => b.textContent === label);
+    await act(async () => button("Pause layout")!.click());
+    expect(worker.sent.at(-1)).toEqual({ type: "pause" });
+    await act(async () => { worker.emit({ type: "state", state: "paused" } as FromWorker); });
+    await act(async () => button("Resume layout")!.click());
+    expect(worker.sent.at(-1)).toEqual({ type: "resume" });
+    await act(async () => { worker.emit({ type: "state", state: "running" } as FromWorker); });
+    expect(button("Pause layout")).toBeDefined();
+    expect(container.textContent).toContain("Laying out");
+  });
+
+  test("a new reply with the same graph keeps the view, worker and selection; a changed graph rebuilds", async () => {
+    const fake = fakeCanvas();
+    let workers = 0;
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => { workers += 1; return new FakeWorker() as unknown as Worker; } });
+    await mount({ graph });
+    await act(async () => { FakeWorker.last!.emit({ type: "ready" } as FromWorker); });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    const render = (g: unknown) => act(async () => {
+      root!.render(<GraphPanel reply={{ graph: g }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
+    });
+    await render(structuredClone(graph));
+    await flush();
+    expect(workers).toBe(1);
+    expect(fake.killed).toBe(false);
+    expect(container.textContent).toContain("Alpha · 1 links");
+    await render({ ...graph, edges: graph.edges.slice(0, 1) });
+    await flush();
+    expect(fake.killed).toBe(true);
+    expect(workers).toBe(2);
+  });
+
+  test("opening a note keeps the vault the graph was opened for", async () => {
+    const fake = fakeCanvas();
+    const opened: unknown[] = [];
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+    await act(async () => {
+      root!.render(<GraphPanel reply={{ graph }} params={{ vault: "work" }} navigate={(p, q) => opened.push([p, q])} beginWrite={() => {}} />);
+    });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    const canvas = container.querySelector(".vmem-graph-canvas") as HTMLElement;
+    await act(async () => { canvas.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    expect(opened).toEqual([["note", { path: "notes/a.md", vault: "work" }]]);
+  });
+
+  test("positions are saved when the layout ends and on unmount, not only on the 2 s throttle", async () => {
+    const fake = fakeCanvas();
+    const data: Record<string, string> = {};
+    const storage = { getItem: (k: string) => data[k] ?? null, setItem: (k: string, v: string) => { data[k] = v; } };
+    configureGraph({ moduleUrl: "x", storage, canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    await mount({ graph });
+    const worker = FakeWorker.last!;
+    await act(async () => { worker.emit({ type: "ready" } as FromWorker); });
+    await flush();
+    await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([1, 1, 2, 2, 3, 3]), iterations: 1 } as FromWorker); });
+    await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([7, 7, 8, 8, 9, 9]), iterations: 2 } as FromWorker); });
+    await act(async () => { worker.emit({ type: "state", state: "done" } as FromWorker); });
+    const saved = () => JSON.parse(Object.values(data)[0]!).positions;
+    expect(saved().c).toEqual([9, 9]);
+    await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([4, 4, 5, 5, 6, 6]), iterations: 3 } as FromWorker); });
+    act(() => root!.unmount());
+    root = null;
+    expect(saved().c).toEqual([6, 6]);
+  });
+
+  test("a layout that fails to start after the canvas mounted is a layout error, not a WebGL one", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => { throw new TypeError("boom"); } });
+    await mount({ graph });
+    await flush();
+    expect(container.textContent).not.toContain("WebGL");
+    expect(container.textContent).toContain("live layout is unavailable");
+  });
+
   test("mounts Sigma, applies worker batches, and tears both down on unmount", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "https://host.test/panel.js", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker, storage: undefined });

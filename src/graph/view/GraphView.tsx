@@ -7,7 +7,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Empty, Notice } from "../../client/components.tsx";
-import type { ViewProps } from "../../client/views/common.ts";
+import { vaultParam, type ViewProps } from "../../client/views/common.ts";
 import { startLayout, type LayoutHandle } from "../layout/client";
 import { buildGraphModel, type GraphModel } from "../model";
 import type { GraphInput } from "../types";
@@ -57,22 +57,36 @@ export function layoutLabel(status: LayoutStatus): string {
     case "paused": return `Layout paused at ${status.iterations} iterations`;
     case "settled": return `Layout settled after ${status.iterations} iterations`;
     case "cached-only": return status.reason;
-    case "error": return `Layout stopped: ${status.message}. Reload the panel to try again.`;
+    // Worker and client messages already name the cause and the next step.
+    case "error": return status.message;
   }
 }
 
-export function GraphPanel({ reply, navigate, theme }: ViewProps) {
-  const input = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
-  const model = useMemo(() => (input ? buildGraphModel(input) : null), [input]);
+/** FNV-1a over the input's JSON: equal for a re-sent identical graph, different for any node or edge change. */
+export function graphContentKey(input: GraphInput): string {
+  const text = JSON.stringify(input);
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${text.length}:${(hash >>> 0).toString(36)}`;
+}
+
+export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
+  // Every poll or push hands over a new reply object; only a changed graph may rebuild the view (and its worker).
+  const parsed = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
+  const key = parsed ? graphContentKey(parsed) : null;
+  const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [key]); // keyed on content, not identity
   if (!model) {
     const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <GraphCanvasView key={model.nodes.length + ":" + model.edges.length} model={model} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
+  return <GraphCanvasView key={key!} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
 }
 
-function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; navigate: ViewProps["navigate"]; themeKey: string }) {
+function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
   const state = useSyncExternalStore((l) => store.subscribe(l), () => store.getState(), () => store.getState());
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -84,8 +98,11 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
     let cancelled = false;
     let lastSave = 0;
     let initialFixed: Uint8Array = new Uint8Array(0);
+    let latest: Float32Array | null = null;
+    const save = () => { if (latest) { store.savePositions(latest); lastSave = Date.now(); } };
     const host = hostRef.current;
     if (!host) return;
+    let stage: "canvas" | "layout" = "canvas";
     (env.canvasDeps ?? loadCanvasDeps)()
       .then((deps) => {
         if (cancelled) return;
@@ -94,6 +111,7 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
           onClick: (id) => store.select(id),
           onCamera: (ratio) => store.setCamera(ratio),
         }, deps);
+        stage = "layout";
         const initial = store.layoutGraph(hashPosition);
         initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
         return startLayout({
@@ -103,15 +121,16 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
           graph: initial,
           onPositions(positions, iterations) {
             canvasRef.current?.applyPositions(positions);
-            const now = Date.now();
-            if (now - lastSave > 2_000) { lastSave = now; store.savePositions(positions); }
-            const kind = store.getState().layout.kind;
-            if (kind !== "paused") store.setLayout({ kind: "running", iterations });
+            latest = positions;
+            if (Date.now() - lastSave > 2_000) save();
+            if (store.getState().layout.kind !== "paused") store.setLayout({ kind: "running", iterations });
           },
           onState(s) {
-            const iterations = "iterations" in store.getState().layout ? (store.getState().layout as { iterations: number }).iterations : 0;
+            const current = store.getState().layout;
+            const iterations = "iterations" in current ? current.iterations : 0;
+            if (s === "running") store.setLayout({ kind: "running", iterations });
             if (s === "paused") store.setLayout({ kind: "paused", iterations });
-            if (s === "done" || s === "stopped") store.setLayout({ kind: "settled", iterations });
+            if (s === "done" || s === "stopped") { save(); store.setLayout({ kind: "settled", iterations }); }
           },
           onError: (message) => store.setLayout({ kind: "error", message }),
         }).then((handle) => {
@@ -132,10 +151,14 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
         });
       })
       .catch((error: unknown) => {
-        if (!cancelled) setCanvasError(`the graph canvas could not start (${error instanceof Error ? error.message : String(error)}); this browser may lack WebGL. Try another browser or enable hardware acceleration.`);
+        if (cancelled) return;
+        const detail = error instanceof Error ? error.message : String(error);
+        if (stage === "canvas") setCanvasError(`the graph canvas could not start (${detail}); this browser may lack WebGL. Try another browser or enable hardware acceleration.`);
+        else store.setLayout({ kind: "error", message: `the graph layout could not start (${detail}); the canvas keeps the cached positions. Reload the panel to try again.` });
       });
     return () => {
       cancelled = true;
+      save();
       layoutRef.current?.teardown();
       layoutRef.current = null;
       canvasRef.current?.destroy();
@@ -178,7 +201,7 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
   };
   const openNote = (id: string) => {
     const node = model.nodes.find((n) => n.id === id);
-    if (node?.relPath) navigate("note", { path: node.relPath });
+    if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
   };
 
   return (
