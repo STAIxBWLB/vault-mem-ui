@@ -47,17 +47,28 @@ test.skipIf(!browser && !process.env.CI)("graph export downloads under the conso
     const target = await call("Target.createTarget", { url: `http://127.0.0.1:${server.port}/` });
     const { sessionId } = await call("Target.attachToTarget", { targetId: target.targetId, flatten: true });
     await call("Runtime.enable", {}, sessionId);
-    // Wait for the external module to install its click handler, then dispatch a browser user gesture.
-    await call("Runtime.evaluate", { expression: "new Promise(r => { if (document.readyState === 'complete') r(); else window.addEventListener('load', r, {once:true}); })", awaitPromise: true }, sessionId);
+    // Target creation can return before navigation commits; wait for the intended document, not about:blank.
+    const waitForDocument = async (session: string, expectedUrl: string, requiredText = "") => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        try {
+          const result = await call("Runtime.evaluate", { expression: "JSON.stringify({url:location.href, ready:document.readyState, text:document.body?.textContent ?? ''})", returnByValue: true }, session);
+          const state = JSON.parse(result.result.value);
+          if (state.url === expectedUrl && state.ready === "complete" && state.text.includes(requiredText)) return;
+        } catch { /* A navigation may replace the execution context before it commits. */ }
+        await Bun.sleep(100);
+      }
+      throw new Error(`Browser did not load the expected document: ${expectedUrl}`);
+    };
+    await waitForDocument(sessionId, `http://127.0.0.1:${server.port}/`, "Export");
     await call("Runtime.evaluate", { expression: "document.getElementById('go').click()", userGesture: true }, sessionId);
     await Promise.race([downloaded, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("Browser did not complete the download under the panel CSP")), 10000))]);
     const html = readFileSync(join(root, "vault-graph.html"), "utf8");
     expect(html).toContain('id="graph-data"');
-    const offline = await call("Target.createTarget", { url: pathToFileURL(join(root, "vault-graph.html")).href });
+    const fileUrl = pathToFileURL(join(root, "vault-graph.html")).href;
+    const offline = await call("Target.createTarget", { url: fileUrl });
     const offlineSession = (await call("Target.attachToTarget", { targetId: offline.targetId, flatten: true })).sessionId;
     await call("Runtime.enable", {}, offlineSession);
-    const result = await call("Runtime.evaluate", { expression: "new Promise(r => { if (document.readyState === 'complete') r(document.body.textContent); else window.addEventListener('load', () => r(document.body.textContent), {once:true}); })", awaitPromise: true, returnByValue: true }, offlineSession);
-    expect(result.result.value).toContain("Alpha (insight, 0 links)");
+    await waitForDocument(offlineSession, fileUrl, "Alpha (insight, 0 links)");
   } finally {
     socket?.close();
     child.kill();
