@@ -1,6 +1,6 @@
 # Third-party notices
 
-The panel bundle contains React and its renderer, and the graph view adds graphology, graphology-layout-forceatlas2 and sigma; all are bundled into `dist/panel.js`.
+The panel bundle contains React and its renderer, and the graph view adds graphology, graphology-layout-forceatlas2, graphology-utils, sigma and Bun's browser `node:events` polyfill; all are bundled into `dist/panel.js`.
 For each bundled package, add a `## package-name` heading followed by `License: identifier` and the applicable notice. The build checks these entries against its bundle inputs.
 
 ## graphology
