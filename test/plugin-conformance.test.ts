@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerConsoleConformance } from "@staix/agent-console/conformance";
+import { createVaultMcp } from "@staix/vault-mem";
 import { plugin } from "../src/plugin/index.ts";
 
 // vmem refuses an input directory reached through a symlink, and `mkdtempSync` on macOS answers one
@@ -28,14 +29,15 @@ writeFileSync(
   join(home, "vmem.config.json"),
   `${JSON.stringify({ vaults: [{ id: "test", path: vault, kind: "personal", write: "mcp" }] }, null, 2)}\n`,
 );
-writeFileSync(
-  join(vault, "notes", "index.md"),
-  "---\ntype: moc\ndomain: research\ntitle: Index\ncreated: 2026-11-21\n---\n\nA map note; vmem's write validation wants one behind every note's topics.\n",
-);
-writeFileSync(
-  join(vault, "notes", "a.md"),
-  '---\ntype: insight\ndomain: research\ntopics: ["[[index]]"]\ntitle: Alpha\ncreated: 2026-11-21\n---\n\nBody line.\n',
-);
+// Create notes through the installed provider's validated public write API.
+const writer = createVaultMcp(home);
+for (const args of [
+  { stem: "index", type: "moc", domain: "research", title: "Index", description: "Synthetic map for conformance" },
+  { stem: "a", type: "insight", domain: "research", title: "Alpha", description: "Synthetic note for conformance", topics: ["index"], body: "Synthetic content.\n\n## Topics\n\n- [[index]]" },
+]) {
+  const receipt = await writer.handlers.vmem_create!(args) as { applied?: boolean; issues?: unknown };
+  if (!receipt.applied) throw new Error(`Could not create synthetic fixture through vmem: ${JSON.stringify(receipt.issues)}`);
+}
 process.env.VMEM_HOME = home;
 process.env.AMEM_HOME = memory;
 

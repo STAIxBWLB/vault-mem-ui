@@ -116,6 +116,10 @@ export function App({ store }: { store: ClientStore }) {
       const action = globalKey(event.key, store.getState().write.phase !== "idle");
       if (action === "close") store.setWrite({ phase: "idle" });
       if (action === "search") {
+        const target = event.composedPath()[0];
+        if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey ||
+            (target instanceof Element && (target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !== null ||
+              (target instanceof HTMLElement && target.isContentEditable)))) return;
         const field = rootRef.current?.querySelector<HTMLInputElement>('input[type="search"]');
         if (field) {
           event.preventDefault();
