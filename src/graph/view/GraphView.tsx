@@ -16,14 +16,14 @@ import type { CacheStorage } from "./cache";
 import { LOD_EDGE_THRESHOLD } from "./lod";
 import { createGraphViewStore, type GraphViewStore, type LayoutStatus } from "./state";
 
-/** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph). */
+/** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph).
+ *  Edges to absent nodes are kept: buildGraphModel turns their endpoints into unresolved ghost nodes. */
 export function readGraphInput(value: unknown): GraphInput | null {
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<GraphInput>;
   if (!Array.isArray(v.nodes) || !Array.isArray(v.edges)) return null;
   const nodes = v.nodes.filter((n) => n && typeof n.id === "string" && typeof n.label === "string");
-  const ids = new Set(nodes.map((n) => n.id));
-  const edges = v.edges.filter((e) => e && ids.has(e.source) && ids.has(e.target) && typeof e.relation === "string");
+  const edges = v.edges.filter((e) => e && typeof e.source === "string" && typeof e.target === "string" && typeof e.relation === "string");
   return { nodes: nodes.map((n) => ({ ...n, relPath: typeof n.relPath === "string" ? n.relPath : null })), edges: edges.map((e) => ({ ...e, fromFrontmatter: e.fromFrontmatter === true })), ...(v.communities ? { communities: v.communities } : {}) };
 }
 
@@ -61,17 +61,18 @@ export function layoutLabel(status: LayoutStatus): string {
   }
 }
 
-export function GraphPanel({ reply, navigate }: ViewProps) {
+export function GraphPanel({ reply, navigate, theme }: ViewProps) {
   const input = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
   const model = useMemo(() => (input ? buildGraphModel(input) : null), [input]);
   if (!model) {
-    return <Empty title="Graph not available" hint="This vmem provider does not send a graph snapshot yet (vault-mem #266). Update @staix/vault-mem, then reload this panel." />;
+    const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
+    return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <GraphCanvasView key={model.nodes.length + ":" + model.edges.length} model={model} navigate={navigate} />;
+  return <GraphCanvasView key={model.nodes.length + ":" + model.edges.length} model={model} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
 }
 
-function GraphCanvasView({ model, navigate }: { model: GraphModel; navigate: ViewProps["navigate"] }) {
+function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; navigate: ViewProps["navigate"]; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
   const state = useSyncExternalStore((l) => store.subscribe(l), () => store.getState(), () => store.getState());
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -129,6 +130,20 @@ function GraphCanvasView({ model, navigate }: { model: GraphModel; navigate: Vie
   }, [model, store]);
 
   useEffect(() => { canvasRef.current?.update(state); }, [state]);
+  // The theme reaches the canvas through the container's computed tokens; re-read them after React applied the
+  // new data-theme (this effect runs after commit).
+  useEffect(() => { canvasRef.current?.refreshTheme(); }, [themeKey]);
+
+  const togglePin = (id: string) => {
+    const wasPinned = store.getState().pinned.has(id);
+    store.togglePin(id);
+    const index = model.nodes.findIndex((n) => n.id === id);
+    const live = canvasRef.current?.positionOf(id) ?? undefined;
+    layoutRef.current?.fix([{ index, fixed: !wasPinned, ...(live ? { position: live } : {}) }]);
+    if (store.getState().layout.kind === "settled" && layoutRef.current) {
+      store.setLayout({ kind: "running", iterations: (store.getState().layout as { iterations: number }).iterations });
+    }
+  };
 
   const selected = state.selectedId ? model.nodes.find((n) => n.id === state.selectedId) ?? null : null;
   const running = state.layout.kind === "running";
@@ -161,7 +176,7 @@ function GraphCanvasView({ model, navigate }: { model: GraphModel; navigate: Vie
         <button type="button" className="vmem-button" disabled={!selected} aria-pressed={state.pathSourceId !== null && !state.path} onClick={() => selected && store.pathTo(selected.id)}>
           {state.pathSourceId && !state.path ? "Path to…" : "Path from"}
         </button>
-        <button type="button" className="vmem-button" disabled={!selected} aria-pressed={selected ? state.pinned.has(selected.id) : false} onClick={() => selected && store.togglePin(selected.id)}>Pin</button>
+        <button type="button" className="vmem-button" disabled={!selected} aria-pressed={selected ? state.pinned.has(selected.id) : false} onClick={() => selected && togglePin(selected.id)}>Pin</button>
         {model.enriched ? <button type="button" className="vmem-button" aria-pressed={state.colorByCommunity} onClick={() => store.setColorByCommunity(!state.colorByCommunity)}>Communities</button> : null}
         {running || paused ? <button type="button" className="vmem-button" onClick={() => (paused ? layoutRef.current?.resume() : layoutRef.current?.pause())}>{paused ? "Resume layout" : "Pause layout"}</button> : null}
       </div>

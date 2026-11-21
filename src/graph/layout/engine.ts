@@ -19,6 +19,8 @@ export interface LayoutEngine {
   readonly movement: number;
   /** Current coordinates as a fresh x0,y0,x1,y1,... array (safe to transfer). */
   positions(): Float32Array;
+  /** Sets or clears node `index`'s fixed flag, optionally moving it first. Out-of-range or non-finite input is ignored. */
+  setFixed(index: number, fixed: boolean, position?: [number, number]): void;
 }
 
 /** Validates the graph and returns the cause of the first problem, or null. */
@@ -91,6 +93,15 @@ export function createLayoutEngine(graph: LayoutGraph, settings: ForceAtlas2Sett
         out[i * 2 + 1] = nodes[i * PPN + 1]!;
       }
       return out;
+    },
+    setFixed(index, fixed, position) {
+      if (!Number.isInteger(index) || index < 0 || index >= n) return;
+      const j = index * PPN;
+      if (position && Number.isFinite(position[0]) && Number.isFinite(position[1])) {
+        nodes[j] = position[0];
+        nodes[j + 1] = position[1];
+      }
+      nodes[j + 9] = fixed ? 1 : 0;
     },
   };
 }

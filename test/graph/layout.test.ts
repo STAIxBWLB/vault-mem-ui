@@ -189,6 +189,46 @@ describe("worker protocol (in process)", () => {
   });
 });
 
+describe("pinning in a live layout", () => {
+  const batch = (w: ReturnType<typeof fakeScope>) => {
+    w.runOne();
+    const m = [...w.out].reverse().find((x) => x.type === "positions");
+    if (!m || m.type !== "positions") throw new Error("no batch");
+    return m.positions;
+  };
+
+  it("a node pinned mid-run holds its position across successive batches, and moves again when released", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: ring(30), settings: inferLayoutSettings(30), batchMs: 2, maxIterations: 10_000, convergedMovement: 0 });
+    batch(w);
+    w.send({ type: "fix", nodes: [{ index: 4, fixed: true, position: [123, -45] }] });
+    const first = batch(w);
+    const second = batch(w);
+    expect([first[8], first[9]]).toEqual([123, -45]);
+    expect([second[8], second[9]]).toEqual([123, -45]);
+    expect([second[10], second[11]]).not.toEqual([first[10], first[11]]); // the others still move
+    w.send({ type: "fix", nodes: [{ index: 4, fixed: false }] });
+    const released = batch(w);
+    expect([released[8], released[9]]).not.toEqual([123, -45]);
+  });
+
+  it("pinning restarts a settled layout and ignores bad indices; a paused one stays paused", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: ring(12), settings: inferLayoutSettings(12), batchMs: 50, maxIterations: 3 });
+    while (w.pending()) w.runOne();
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+    w.send({ type: "fix", nodes: [{ index: 99, fixed: true }, { index: 1, fixed: false }] });
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "running" });
+    expect(w.pending()).toBe(1);
+
+    const p = fakeScope();
+    p.send({ type: "init", graph: ring(12), settings: inferLayoutSettings(12), batchMs: 2 });
+    p.send({ type: "pause" });
+    p.send({ type: "fix", nodes: [{ index: 0, fixed: true }] });
+    expect(p.out.at(-1)).toEqual({ type: "state", state: "paused" });
+  });
+});
+
 describe("startLayout with a real module worker", () => {
   it("starts from a module URL, streams positions, and cancels on stop", async () => {
     const batches: Float32Array[] = [];

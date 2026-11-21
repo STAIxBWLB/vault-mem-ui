@@ -25,6 +25,8 @@ export interface LayoutHandle {
   readonly state: "running";
   pause(): void;
   resume(): void;
+  /** Pins or releases nodes in the live layout (see ToWorker "fix"). */
+  fix(nodes: { index: number; fixed: boolean; position?: [number, number] }[]): void;
   /** Stops iterating; the worker sends the final positions and stays alive until teardown. */
   stop(): void;
   /** Ends the worker. Safe to call more than once. */
@@ -88,6 +90,7 @@ export function startLayout(options: StartLayoutOptions): Promise<LayoutHandle |
       state: "running",
       pause: () => send({ type: "pause" }),
       resume: () => send({ type: "resume" }),
+      fix: (nodes) => send({ type: "fix", nodes }),
       stop: () => send({ type: "stop" }),
       teardown: () => { if (ended) return; send({ type: "teardown" }); end(); },
     };

@@ -147,9 +147,12 @@ describe("readGraphInput", () => {
     expect(readGraphInput(undefined)).toBeNull();
     expect(readGraphInput({ nodes: [] })).toBeNull();
   });
-  test("drops malformed nodes and edges whose endpoints are missing", () => {
-    const got = readGraphInput({ nodes: [{ id: "a", label: "A" }, { id: 3 }], edges: [{ source: "a", target: "x", relation: "r" }, { source: "a", target: "a", relation: "r" }] });
-    expect(got).toEqual({ nodes: [{ id: "a", label: "A", relPath: null }], edges: [{ source: "a", target: "a", relation: "r", fromFrontmatter: false }] });
+  test("drops malformed nodes and edges but keeps edges to absent nodes for ghost creation", () => {
+    const got = readGraphInput({ nodes: [{ id: "a", label: "A" }, { id: 3 }], edges: [{ source: "a", target: "x", relation: "r" }, { source: "a", target: 5, relation: "r" }] });
+    expect(got).toEqual({ nodes: [{ id: "a", label: "A", relPath: null }], edges: [{ source: "a", target: "x", relation: "r", fromFrontmatter: false }] });
+    const model = buildGraphModel(readGraphInput({ nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false }] })!, 0);
+    expect(model.edges).toHaveLength(1);
+    expect(model.nodes.find((n) => n.id === "missing")).toMatchObject({ relPath: null });
   });
 });
 

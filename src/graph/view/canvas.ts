@@ -8,7 +8,7 @@
 import type { GraphModel } from "../model";
 import { graphEdgeVisibilityKey } from "../model";
 import { isUsableCoordinate } from "../positions";
-import { communityColor, edgeColor, graphTheme, nodeColor, nodeRadius } from "../style";
+import { communityColor, edgeColor, graphTheme, nodeColor, nodeRadius, refreshGraphTheme } from "../style";
 import { drawNodeHover, drawNodeLabel } from "../labels";
 import type { GraphDisplaySettings } from "../types";
 import type { GraphViewState } from "./state";
@@ -29,6 +29,8 @@ export interface GraphLike {
   addEdgeWithKey(key: string, source: string, target: string, attrs: Record<string, unknown>): unknown;
   setNodeAttribute(id: string, name: string, value: unknown): unknown;
   hasNode(id: string): boolean;
+  setEdgeAttribute(key: string, name: string, value: unknown): unknown;
+  getNodeAttribute(id: string, name: string): unknown;
 }
 export interface CanvasDeps {
   createGraph(): GraphLike;
@@ -55,6 +57,10 @@ export interface GraphCanvasHandle {
   /** Applies a layout batch (model node order). */
   applyPositions(positions: ArrayLike<number>): void;
   focusNode(id: string): void;
+  /** Re-reads the graph colours from the container's computed tokens (after a host or person theme change) and redraws. */
+  refreshTheme(): void;
+  /** The node's current graph coordinates, or null. */
+  positionOf(id: string): [number, number] | null;
   destroy(): void;
 }
 
@@ -74,6 +80,7 @@ export function mountGraphCanvas(
 ): GraphCanvasHandle {
   const graph = deps.createGraph();
   const display = DISPLAY;
+  refreshGraphTheme(container);
   model.nodes.forEach((node, index) => {
     const fallback = hashPosition(node.id, index);
     const seed = cached[node.id];
@@ -197,6 +204,17 @@ export function mountGraphCanvas(
       const d = sigma.getNodeDisplayData(id);
       if (!d) return;
       sigma.getCamera().animate({ x: d.x, y: d.y, ratio: Math.min(sigma.getCamera().getState().ratio, 0.5) }, { duration: prefersReducedMotion() ? 0 : 300 });
+    },
+    refreshTheme() {
+      refreshGraphTheme(container);
+      model.nodes.forEach((node) => graph.setNodeAttribute(node.id, "color", nodeColor(node, model.enriched, "neutral")));
+      model.edges.forEach((edge, index) => graph.setEdgeAttribute(`e${index}`, "color", edgeColor(edge, display)));
+      sigma.refresh();
+    },
+    positionOf(id) {
+      if (!graph.hasNode(id)) return null;
+      const x = graph.getNodeAttribute(id, "x"), y = graph.getNodeAttribute(id, "y");
+      return typeof x === "number" && typeof y === "number" && Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
     },
     destroy() { sigma.kill(); },
   };

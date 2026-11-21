@@ -37,13 +37,16 @@ interface Fake {
   handlers: Map<string, (p: { node?: string }) => void>;
   refreshes: number;
   killed: boolean;
+  edgeColors: Map<string, string>;
 }
 function fakeCanvas(): Fake {
-  const fake: Fake = { attrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, deps: null! };
+  const fake: Fake = { attrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
   const graph: GraphLike = {
     addNode: (id, a) => fake.attrs.set(id, { ...a }),
     addEdgeWithKey: () => undefined,
     setNodeAttribute: (id, k, v) => { fake.attrs.get(id)![k] = v; },
+    getNodeAttribute: (id, k) => fake.attrs.get(id)?.[k],
+    setEdgeAttribute: (key, k, v) => { fake.edgeColors.set(key, v as string); void k; },
     hasNode: (id) => fake.attrs.has(id),
   };
   const sigma: SigmaLike = {
@@ -84,12 +87,12 @@ const graph = {
   ],
 };
 
-async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}) {
+async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}, theme?: { mode: "light" | "dark" }) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<GraphPanel reply={reply} params={{}} navigate={navigate} beginWrite={() => {}} />);
+    root!.render(<GraphPanel reply={reply} params={{}} navigate={navigate} beginWrite={() => {}} theme={theme} />);
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
@@ -102,6 +105,54 @@ describe("GraphPanel", () => {
     await mount({});
     expect(container.textContent).toContain("Graph not available");
     expect(container.textContent).toContain("vault-mem #266");
+  });
+
+  test("the host's unavailable reason is shown as given", async () => {
+    configureGraph({});
+    await mount({ graph: null, unavailable: "the provider is old; update it, then reload this panel" });
+    expect(container.textContent).toContain("The provider is old; update it, then reload this panel.");
+  });
+
+  test("an edge to an absent note keeps the link and draws the target as an unresolved ghost", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false }] } });
+    await flush();
+    expect([...fake.attrs.keys()].sort()).toEqual(["a", "missing"]);
+    expect(container.textContent).toContain("2 notes · 1 links");
+  });
+
+  test("pinning while the layout runs tells the worker, with the node's current position", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    await mount({ graph });
+    const worker = FakeWorker.last!;
+    await act(async () => { worker.emit({ type: "ready" } as FromWorker); });
+    await flush();
+    await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([1, 2, 3, 4, 5, 6]), iterations: 3 } as FromWorker); });
+    await act(async () => fake.handlers.get("clickNode")!({ node: "b" }));
+    const pin = [...container.querySelectorAll("button")].find((b) => b.textContent === "Pin")!;
+    await act(async () => pin.click());
+    expect(worker.sent.at(-1)).toEqual({ type: "fix", nodes: [{ index: 1, fixed: true, position: [3, 4] }] });
+    expect(pin.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => pin.click());
+    expect(worker.sent.at(-1)).toEqual({ type: "fix", nodes: [{ index: 1, fixed: false, position: [3, 4] }] });
+  });
+
+  test("a theme change re-reads the canvas tokens and recolours nodes and edges", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph }, () => {}, { mode: "light" });
+    await flush();
+    const lightEdge = fake.edgeColors.get("e0");
+    const canvas = container.querySelector(".vmem-graph-canvas") as HTMLElement;
+    canvas.style.setProperty("--graph-canvas", "#101010");
+    await act(async () => {
+      root!.render(<GraphPanel reply={{ graph }} params={{}} navigate={() => {}} beginWrite={() => {}} theme={{ mode: "dark" }} />);
+    });
+    const darkEdge = fake.edgeColors.get("e0");
+    expect(darkEdge).toBeDefined();
+    expect(darkEdge).not.toBe(lightEdge);
   });
 
   test("mounts Sigma, applies worker batches, and tears both down on unmount", async () => {

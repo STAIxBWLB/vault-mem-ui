@@ -100,6 +100,13 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
         case "resume":
           if (state === "paused") run();
           break;
+        case "fix":
+          if (!engine || state === "stopped") break;
+          for (const node of message.nodes) engine.setFixed(node.index, node.fixed, node.position);
+          streak = 0;
+          // A settled layout runs again so released nodes move; a paused one stays paused until resumed.
+          if (state === "done") run();
+          break;
         case "stop":
           if (engine && state !== "stopped") { state = "stopped"; sendPositions(); post({ type: "state", state: "stopped" }); }
           break;

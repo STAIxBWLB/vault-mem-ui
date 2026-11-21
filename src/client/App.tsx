@@ -96,7 +96,7 @@ export function PanelView(props: PanelViewProps) {
         {state.phase === "error" && state.error ? <Notice tone="err">{state.error}</Notice> : null}
         {state.phase === "loading" && !state.reply ? <p className="vmem-sub">Loading {TITLES[state.panel] ?? state.panel}…</p> : null}
         {state.reply ? (
-          <View reply={state.reply} params={state.params} navigate={props.onNavigate} beginWrite={props.onWrite} />
+          <View reply={state.reply} params={state.params} navigate={props.onNavigate} beginWrite={props.onWrite} theme={state.theme} />
         ) : null}
       </main>
       <WriteDialog state={state.write} onConfirm={props.onConfirm} onCancel={props.onCancel} />
