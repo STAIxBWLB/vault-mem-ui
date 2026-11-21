@@ -1,10 +1,11 @@
 /**
  * Bundle entry. `acon` imports this file as its panel module and calls the default export with its host;
- * the standalone shell imports `mountClient` and supplies its own host over the M1-b HTTP endpoints.
+ * the standalone page mounts this bundle with its HTTP host adapter.
  */
 
 import { createRoot } from "react-dom/client";
 import { createAconHost } from "./acon.ts";
+import { createStandaloneHost } from "./standalone.ts";
 import { App, createClient } from "./App.tsx";
 import type { Host } from "./host.ts";
 
@@ -48,4 +49,10 @@ export function mountClient(host: Host, options: { initialPanel?: string; autoLo
 /** `acon` panel factory: the console's host is adapted, the client itself is host-agnostic. */
 export default function panel(panelHost: Parameters<typeof createAconHost>[0]): ClientHandle {
   return mountClient(createAconHost(panelHost));
+}
+
+// The standalone page owns this root; acon's shell does not create it.
+if (typeof document !== "undefined") {
+  const standaloneRoot = document.getElementById("vmem-ui-root");
+  if (standaloneRoot) mountClient(createStandaloneHost(standaloneRoot));
 }
