@@ -27,6 +27,10 @@ The `acon` plugin in `src/plugin` keeps `@staix/vault-mem/ui-plugin`'s provider 
 - Reads and writes only through vmem's provider, so every write passes vmem's validation and two-step confirmation.
 - Depends on `@staix/vault-mem`; vault-mem does not depend on this package.
 
+## Offline graph export
+
+The graph export produces one self-contained HTML file containing graph metadata and positions, without note bodies. The download component supports both `acon` and the standalone host; its graph-view integration awaits the provider snapshot adapter.
+
 ## Standalone host (vmem-ui)
 
 `bun run build`, then `bun bin/vmem-ui.ts` (installed as `vmem-ui`). It opens the vault-mem provider in process, listens on `127.0.0.1` only and prints a one-time sign-in link valid for 5 minutes.

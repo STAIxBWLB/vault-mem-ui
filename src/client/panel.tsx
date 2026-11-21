@@ -13,6 +13,7 @@ export { createClient } from "./App.tsx";
 export { createStore } from "./store.ts";
 export { DEFAULT_PREFS, readPrefs, writePrefs, type Prefs } from "./prefs.ts";
 export { createAconHost } from "./acon.ts";
+export { GraphExportButton, downloadGraphHtml } from "./graph-export.tsx";
 
 export interface ClientHandle {
   show(panel: string, params?: Record<string, string>): void;
