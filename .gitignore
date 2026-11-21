@@ -1,3 +1,5 @@
 .agenthub/
 .jcode/
 .worktrees/
+node_modules/
+dist/
