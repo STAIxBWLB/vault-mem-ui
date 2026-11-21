@@ -5,11 +5,12 @@
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { parseMarkdown, safeHref } from "../../src/client/markdown/parse.ts";
+import { MAX_BLOCK_DEPTH, parseInline, parseMarkdown, safeHref, type Block } from "../../src/client/markdown/parse.ts";
 import { Markdown, wikiIndex, wikiKey } from "../../src/client/markdown/render.tsx";
 import { NoteView } from "../../src/client/views/note.tsx";
 
@@ -181,18 +182,26 @@ describe("vault text cannot become markup", () => {
     expect(markup.match(/target="_blank"/g)?.length).toBe(2);
     expect(markup.match(/rel="noopener noreferrer"/g)?.length).toBe(2);
   });
+
+  test("a link inside a link label stays one anchor: the inner link wins, the outer stays text", () => {
+    const markup = html("[outer [inner](https://example.test/in)](https://example.test/out)");
+    expect(markup.match(/<a[\s>]/g)?.length).toBe(1);
+    expect(markup).toContain('href="https://example.test/in"');
+    expect(markup).not.toContain('href="https://example.test/out"');
+    expect(markup).toContain("[outer ");
+  });
 });
 
 describe("wiki-links are read from the provider's own resolution", () => {
   test("the payload is keyed by the link, not by the note, so one target can be two answers", () => {
     const index = wikiIndex(links);
-    expect(index.get(wikiKey("Beta", "", ""))).toBe("notes/beta.md");
-    expect(index.get(wikiKey("Missing", "", ""))).toBeNull();
+    expect(index.get(wikiKey("Beta", "", ""))).toEqual({ kind: "resolved", path: "notes/beta.md" });
+    expect(index.get(wikiKey("Missing", "", ""))).toEqual({ kind: "dead", reason: "", suggested: "" });
     expect(index.has(wikiKey("NotListed", "", ""))).toBe(false);
     expect(wikiIndex(undefined).size).toBe(0);
     // A null anchor in the payload and no anchor in the note are the same link.
     const bare = wikiIndex({ out: [{ target: "Beta", heading: null, block: null, resolved: "notes/beta.md" }] });
-    expect(bare.get(wikiKey("Beta", "", ""))).toBe("notes/beta.md");
+    expect(bare.get(wikiKey("Beta", "", ""))).toEqual({ kind: "resolved", path: "notes/beta.md" });
   });
 
   test("the review's reproduction: a resolved link and a dead one to the same note stay apart", () => {
@@ -200,8 +209,8 @@ describe("wiki-links are read from the provider's own resolution", () => {
       out: [{ target: "Alpha", heading: null, block: null, resolved: "notes/a.md" }],
       dead: [{ target: "Alpha", heading: "missing", block: null, resolved: null }],
     };
-    expect(wikiIndex(mixed).get(wikiKey("Alpha", "", ""))).toBe("notes/a.md");
-    expect(wikiIndex(mixed).get(wikiKey("Alpha", "missing", ""))).toBeNull();
+    expect(wikiIndex(mixed).get(wikiKey("Alpha", "", ""))).toEqual({ kind: "resolved", path: "notes/a.md" });
+    expect(wikiIndex(mixed).get(wikiKey("Alpha", "missing", ""))).toEqual({ kind: "dead", reason: "", suggested: "" });
 
     const markup = html("[[Alpha]] and [[Alpha#missing]]", mixed);
     expect(markup.match(/<button type="button" class="vmem-md-wiki">/g)?.length).toBe(1);
@@ -253,6 +262,50 @@ describe("wiki-links are read from the provider's own resolution", () => {
     expect(markup).not.toContain("could not resolve");
   });
 
+  test("a dead link shows vmem's own reason and the note it suggests", () => {
+    const dead = (reason: string, suggested?: string) => ({
+      dead: [{
+        target: "Alpha",
+        heading: null,
+        block: null,
+        resolved: null,
+        reason,
+        suggested: suggested ? { path: suggested, score: 0.8 } : null,
+      }],
+    });
+    const cases: [string, string][] = [
+      ["missing-note", "no note has this name"],
+      ["ambiguous-note", "more than one note has this name"],
+      ["missing-heading", "the note it names has no such heading"],
+      ["missing-block", "the note it names has no such block"],
+    ];
+    for (const [reason, why] of cases) {
+      const markup = html("[[Alpha]]", dead(reason));
+      expect({ reason, why: markup.includes(why) }).toEqual({ reason, why: true });
+      expect({ reason, generic: markup.includes("vmem could not resolve this link") }).toEqual({ reason, generic: false });
+    }
+    const hinted = html("[[Alpha]]", dead("missing-note", "notes/alpha.md"));
+    expect(hinted).toContain("no note has this name");
+    expect(hinted).toContain("vmem suggests notes/alpha.md");
+    // An answer with no reason at all keeps the sentence the panel already had.
+    const bare = { dead: [{ target: "Alpha", heading: null, block: null, resolved: null }] };
+    expect(html("[[Alpha]]", bare)).toContain("vmem could not resolve this link");
+  });
+
+  test("a table keeps the escape vmem's own scan sees, so the link keys the same way", () => {
+    const table = "| link |\n| --- |\n| [[A\\|alias]] |";
+    const cell = parseMarkdown(table)[0];
+    const first = cell?.kind === "table" ? cell.rows[0]?.[0]?.[0] : undefined;
+    expect(first?.kind === "wiki" ? [first.target, first.label] : null).toEqual(["A\\", "alias"]);
+
+    // vmem's scan of the note reports `A\`, so that key resolves the cell...
+    const asProvider = { out: [{ target: "A\\", heading: null, block: null, resolved: "notes/a.md" }] };
+    expect(html(table, asProvider)).toContain('<button type="button" class="vmem-md-wiki">alias</button>');
+    // ...and the unescaped key does not, which is the mismatch the earlier version of this cell had.
+    const asUnescaped = { out: [{ target: "A", heading: null, block: null, resolved: "notes/a.md" }] };
+    expect(html(table, asUnescaped)).toContain("vmem-md-wiki-unknown");
+  });
+
   test("an embed is a link to its note, marked as an embed, because the panel fetches nothing else", () => {
     const markup = html("![[Beta]]", links);
     expect(markup).toContain("vmem-md-wiki-embed");
@@ -294,6 +347,57 @@ describe("no client source can build markup", () => {
   });
 });
 
+describe("nesting is capped, so a small note cannot overflow the stack", () => {
+  const depthOf = (blocks: Block[], level = 1): number => {
+    let deepest = level;
+    for (const block of blocks) {
+      const children = block.kind === "quote"
+        ? block.children
+        : block.kind === "list"
+          ? block.items.flatMap((item) => item.children)
+          : [];
+      if (children.length) deepest = Math.max(deepest, depthOf(children, level + 1));
+    }
+    return deepest;
+  };
+
+  test("a 5000-deep list and quote are text, not a recursion", () => {
+    for (const source of ["- ".repeat(5000) + "x", ">".repeat(5000) + "x"]) {
+      const blocks = parseMarkdown(source);
+      expect({ marker: source.slice(0, 2), blocks: blocks.length > 0 }).toEqual({ marker: source.slice(0, 2), blocks: true });
+      expect(depthOf(blocks)).toBeLessThanOrEqual(MAX_BLOCK_DEPTH + 1);
+      // What sits past the cap is still shown, as the text it was.
+      expect(html(source)).toContain("x");
+    }
+  });
+
+  test.skipIf(!Bun.which("node"))("the same depths under V8, the engine the panel runs in", async () => {
+    const out = `${tmpdir()}/vmem-md-depth-${process.pid}.mjs`;
+    const built = Bun.spawnSync([
+      process.execPath, "build", "src/client/markdown/parse.ts", "--target=node", "--format=esm", `--outfile=${out}`,
+    ]);
+    expect({ built: built.exitCode, err: built.stderr.toString().slice(0, 300) }).toEqual({ built: 0, err: "" });
+    const script = [
+      `const { parseMarkdown } = await import(${JSON.stringify(out)});`,
+      'for (const text of ["- ".repeat(5000) + "x", ">".repeat(5000) + "x"]) {',
+      "  const blocks = parseMarkdown(text);",
+      '  if (!blocks.length) throw new Error("no blocks");',
+      "}",
+      'console.log("ok");',
+    ].join("\n");
+    const run = Bun.spawnSync([Bun.which("node")!, "--input-type=module", "-e", script]);
+    await Bun.file(out).delete();
+    expect({ code: run.exitCode, out: run.stdout.toString().trim(), err: run.stderr.toString().slice(0, 300) })
+      .toEqual({ code: 0, out: "ok", err: "" });
+  });
+
+  test("a note that repeats an opener is read once and stays literal text", () => {
+    const nodes = parseInline("*a ".repeat(5400));
+    expect(nodes.length).toBeGreaterThan(0);
+    expect(nodes.every((node) => node.kind === "text")).toBe(true);
+  });
+});
+
 describe("the note panel navigates through its wiki-links", () => {
   let root: Root | null = null;
   let container: HTMLElement;
@@ -319,10 +423,15 @@ describe("the note panel navigates through its wiki-links", () => {
     container = document.createElement("div");
     document.body.append(container);
     root = createRoot(container);
+    // The panel lists its own outgoing links keyed by resolved path, so one link per note here keeps that list unique.
+    const panelLinks = {
+      out: [{ target: "Beta", heading: null, block: null, resolved: "notes/beta.md" }],
+      dead: [{ target: "Missing", heading: null, block: null, resolved: null }],
+    };
     act(() =>
       root!.render(
         <NoteView
-          reply={{ note: { path: "notes/a.md", body: "See [[Beta]] and [[Missing]]." }, links, orgVaults: [] }}
+          reply={{ note: { path: "notes/a.md", body: "See [[Beta]] and [[Missing]]." }, links: panelLinks, orgVaults: [] }}
           params={{ vault: "work" }}
           navigate={(panel, params) => calls.push([panel, params])}
           beginWrite={() => {}}
