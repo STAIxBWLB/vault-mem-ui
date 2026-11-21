@@ -69,7 +69,10 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // A panel the browser stored, or an unknown id from a link, falls back to the first panel.
       const next = panel.trim() || "overview";
       if (next !== state.prefs.lastPanel) set({ prefs: writePrefs({ ...state.prefs, lastPanel: next }, storage) });
-      set({ panel: next, params, phase: "loading", error: undefined });
+      // The reply belongs to the panel and parameters it was asked for: keeping it would show the previous note's
+      // content, and let its delete or move run under the newly chosen vault. An open preview goes with it, since
+      // its input carries the old path.
+      set({ panel: next, params, phase: "loading", error: undefined, reply: null, write: { phase: "idle" } });
       void store.refresh();
     },
     navigate(panel, params = {}) {
@@ -99,7 +102,9 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
     },
     async beginWrite(input) {
       const result = await startWrite(host, input);
-      set({ write: result });
+      // A host that owns the confirmation already told the person through its own notification (`quiet`), so the
+      // panel keeps no dialog state for it; anything else is shown here.
+      set({ write: result.phase === "done" && result.quiet ? { phase: "idle" } : result });
       if (result.phase === "done") void store.refresh();
     },
     async confirmWriteNow() {

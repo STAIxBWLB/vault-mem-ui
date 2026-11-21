@@ -1,6 +1,6 @@
 /** Shared pieces of the panel: a keyboard-navigable list, notices, chips, fields and the write dialog. */
 
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { isListKey, nextFocus } from "./a11y.ts";
 import type { WriteState } from "./write.ts";
 
@@ -135,11 +135,59 @@ export function SearchForm({ value, onSubmit }: { value: string; onSubmit(q: str
  */
 export function WriteDialog(props: { state: WriteState; onConfirm(): void; onCancel(): void }) {
   const state = props.state;
-  if (state.phase === "idle") return null;
-  const heading = state.phase === "preview" ? state.verb : state.phase === "done" ? "Done" : "Refused";
+  const open = state.phase !== "idle" && !(state.phase === "done" && state.quiet);
+  const box = useRef<HTMLElement | null>(null);
+  const returnTo = useRef<Element | null>(null);
+
+  // Focus moves into the dialog when it opens and back to the control that opened it when it closes; Tab is
+  // contained, so the panel behind the overlay cannot be reached or activated by keyboard.
+  useEffect(() => {
+    if (!open) return;
+    returnTo.current = typeof document === "undefined" ? null : document.activeElement;
+    const inside = box.current;
+    inside?.focus();
+    return () => {
+      const back = returnTo.current;
+      if (back instanceof HTMLElement && back.isConnected) back.focus();
+    };
+  }, [open]);
+
+  if (!open) return null;
+  const heading = state.phase === "preview" ? state.verb : state.phase === "done" ? "Done" : state.phase === "cancelled" ? "Cancelled" : "Refused";
+  const trap = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const inside = box.current;
+    if (!inside) return;
+    const focusable = [...inside.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) return;
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+    const at = document.activeElement;
+    // The dialog itself holds the focus after opening, so the first Tab enters the controls.
+    if (at === inside || !inside.contains(at)) {
+      event.preventDefault();
+      (event.shiftKey ? last : first).focus();
+      return;
+    }
+    if (!event.shiftKey && at === last) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && at === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  };
   return (
     <div className="vmem-dialog-backdrop">
-      <section className="vmem-dialog" role="dialog" aria-modal="true" aria-label={heading}>
+      <section
+        className="vmem-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={heading}
+        tabIndex={-1}
+        ref={box}
+        onKeyDown={trap}
+      >
         <h2 className="vmem-dialog-title">{heading}</h2>
         {state.phase === "preview" ? (
           <>

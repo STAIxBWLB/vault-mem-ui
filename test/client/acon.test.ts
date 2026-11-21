@@ -58,14 +58,18 @@ describe("createAconHost", () => {
     expect(recorded.snapshots).toEqual([{}]);
   });
 
-  test("forwards an action and its confirmation unchanged", async () => {
+  test("forwards the action but not the confirmation, which the console sets on its own call", async () => {
     const recorded = empty();
     const host = createAconHost(consoleHost(recorded));
     expect(await host.action({ action: "delete", path: "notes/a.md", confirmed: true, fingerprint: "sha256:abc" })).toEqual({
       ok: true,
       message: "delete",
     });
-    expect(recorded.actions).toEqual([{ action: "delete", path: "notes/a.md", confirmed: true, fingerprint: "sha256:abc" }]);
+    expect(recorded.actions).toEqual([{ action: "delete", path: "notes/a.md" }]);
+  });
+
+  test("says the console owns the preview and the confirmation", () => {
+    expect(createAconHost(consoleHost(empty())).confirm).toBe("host");
   });
 
   test("navigates through the console's tabs, named by the console's own tool", () => {

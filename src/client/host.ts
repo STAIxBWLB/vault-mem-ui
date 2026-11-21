@@ -43,6 +43,8 @@ export interface ActionResult {
   changes?: Change[];
   warnings?: string[];
   applied?: boolean;
+  /** A host that owns the confirmation (`confirm: "host"`) reports the person's cancellation this way. */
+  cancelled?: boolean;
 }
 
 export interface ActionInput extends Params {
@@ -61,6 +63,14 @@ export interface Host {
   action(input: ActionInput): Promise<ActionResult>;
   /** The host's current theme; the person's own preference may override it for this panel. */
   theme(): Theme;
+  /**
+   * Who shows the preview and sends the confirmation. `"client"` (the default) means `action` answers the
+   * provider's `needsConfirm` to this panel, which renders the preview and re-sends the fingerprint — what the
+   * fake host and a host that answers the provider directly do. `"host"` means the host runs that round trip
+   * itself and only resolves `action` with the outcome, as `acon` does: its console mints the confirm token,
+   * renders the preview in its own dialog and refuses a page that sets `confirmed` or `fingerprint`.
+   */
+  confirm?: "client" | "host";
   /** Push from the host. When absent the client polls `snapshot` instead. */
   subscribe?(listener: (reply: SnapshotReply) => void): () => void;
   /** Switch to a panel. When absent the client switches in place. */

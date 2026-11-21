@@ -38,11 +38,17 @@ describe("startWrite", () => {
     expect(await startWrite(host, { action: "move", from: "a", to: "b" })).toEqual({ phase: "done", message: "Move note: done" });
   });
 
-  test("a refusal is an error naming the provider's reason, not a dialog with nothing to confirm", async () => {
+  test("a refusal keeps the provider's own words first and adds the next step", async () => {
     const host = createFakeHost({ replies: { delete: { ok: false, error: "path is required" } } });
-    expect(await startWrite(host, { action: "delete" })).toEqual({ phase: "error", message: "path is required" });
+    expect(await startWrite(host, { action: "delete" })).toEqual({
+      phase: "error",
+      message: "path is required. Fix that and start the write again, or reload the panel first if it may already have been applied.",
+    });
     const silent = createFakeHost({ replies: { delete: { ok: false } } });
-    expect(await startWrite(silent, { action: "delete" })).toEqual({ phase: "error", message: "delete: the provider refused the write" });
+    expect(await startWrite(silent, { action: "delete" })).toEqual({
+      phase: "error",
+      message: "delete was refused without a reason. Reload the panel and try again; if it repeats, check the vault's log.",
+    });
   });
 
   test("a confirmation request without a fingerprint cannot be confirmed, so it is refused instead", async () => {

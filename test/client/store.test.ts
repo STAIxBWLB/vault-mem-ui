@@ -113,6 +113,45 @@ describe("refresh", () => {
     expect(store.getState().reply).toEqual({ body: "b" });
   });
 
+  test("a panel or parameter change drops the previous reply, so its content cannot be acted on under new ones", async () => {
+    const { host, pending } = deferred();
+    const store = createStore(host);
+    store.show("note", { path: "notes/a.md", vault: "personal" });
+    pending[0]!.resolve({ note: { path: "notes/a.md" }, body: "A" });
+    await Bun.sleep(0);
+    expect(store.getState().reply).toEqual({ note: { path: "notes/a.md" }, body: "A" });
+
+    // Same panel, another vault: the next snapshot has not answered yet.
+    store.show("note", { path: "notes/a.md", vault: "org" });
+    expect(store.getState().reply).toBeNull();
+    expect(store.getState().phase).toBe("loading");
+    // Another panel: the note that was shown is not rendered there either.
+    store.show("log");
+    expect(store.getState().reply).toBeNull();
+  });
+
+  test("a failure leaves no reply behind for the person to act on", async () => {
+    const { host, pending } = deferred();
+    const store = createStore(host);
+    store.show("note", { path: "notes/a.md" });
+    pending[0]!.resolve({ note: { path: "notes/a.md" } });
+    await Bun.sleep(0);
+    store.show("note", { path: "notes/b.md" });
+    pending[1]!.reject(new Error("refused"));
+    await Bun.sleep(1);
+    expect(store.getState().phase).toBe("error");
+    expect(store.getState().reply).toBeNull();
+  });
+
+  test("a panel change closes an open preview, so its write cannot run under the new panel", async () => {
+    const host = createFakeHost({ replies: { delete: { ok: false, needsConfirm: true, fingerprint: "sha256:abc" } } });
+    const store = createStore(host);
+    await store.beginWrite({ action: "delete", path: "notes/a.md", vault: "personal" });
+    expect(store.getState().write.phase).toBe("preview");
+    store.show("note", { path: "notes/a.md", vault: "org" });
+    expect(store.getState().write).toEqual({ phase: "idle" });
+  });
+
   test("a slow failure does not report an error over the panel that did load", async () => {
     const { host, pending } = deferred();
     const store = createStore(host);

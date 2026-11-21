@@ -22,6 +22,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^21.0.4",
     "@staix/agent-console": "github:STAIxBWLB/agent-console#8babe31f421682670a17ee2498f485e6f9ea20a5",
     "@types/bun": "^1.4.2",
     "@types/react": "^19",
