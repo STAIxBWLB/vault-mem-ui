@@ -62,28 +62,26 @@ export function layoutLabel(status: LayoutStatus): string {
   }
 }
 
-/** FNV-1a over the input's JSON: equal for a re-sent identical graph, different for any node or edge change. */
-export function graphContentKey(input: GraphInput): string {
-  const text = JSON.stringify(input);
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i += 1) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return `${text.length}:${(hash >>> 0).toString(36)}`;
+/** Exact serialized content of a graph input: equal for a resent identical graph, different for any change. */
+export function graphContent(input: GraphInput): string {
+  return JSON.stringify(input);
 }
 
 export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
   // Every poll or push hands over a new reply object; only a changed graph may rebuild the view (and its worker).
+  // Content is compared exactly (no hash, so no collisions); the generation counter is the React key.
   const parsed = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
-  const key = parsed ? graphContentKey(parsed) : null;
-  const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [key]); // keyed on content, not identity
+  const last = useRef<{ content: string | null; generation: number }>({ content: null, generation: 0 });
+  const content = parsed ? graphContent(parsed) : null;
+  if (content !== last.current.content) last.current = { content, generation: last.current.generation + 1 };
+  const generation = last.current.generation;
+  const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [generation]); // keyed on content, not identity
   if (!model) {
     const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <GraphCanvasView key={key!} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
+  return <GraphCanvasView key={generation} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
 }
 
 function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {

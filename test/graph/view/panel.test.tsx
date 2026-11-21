@@ -211,6 +211,23 @@ describe("GraphPanel", () => {
     expect(workers).toBe(2);
   });
 
+  test("snapshots whose old 32-bit content hashes collided still rebuild with the new data", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const one = (label: string) => ({ nodes: [{ id: "a", label, relPath: "notes/a.md" }], edges: [] });
+    await mount({ graph: one("0066j8m") });
+    await flush();
+    expect(fake.attrs.get("a")!.label).toBe("0066j8m");
+    const next = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => next.deps });
+    await act(async () => {
+      root!.render(<GraphPanel reply={{ graph: one("0p1umdh") }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
+    });
+    await flush();
+    expect(fake.killed).toBe(true);
+    expect(next.attrs.get("a")!.label).toBe("0p1umdh");
+  });
+
   test("opening a note keeps the vault the graph was opened for", async () => {
     const fake = fakeCanvas();
     const opened: unknown[] = [];
