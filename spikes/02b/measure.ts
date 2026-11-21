@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 
 // Drives the page: reads per-case progress from window.partialResults, clicks #pulse every
 // 50 ms while a case runs, and fails the run on any HTTP 4xx/5xx or console/page error, so a
@@ -46,7 +46,11 @@ await context.addInitScript(
 const page = await context.newPage();
 const errors = [];
 const httpErrors = [];
-const outFile = new URL(`./${process.env.SPIKE_OUT || 'result'}.json`, import.meta.url).pathname;
+const outputName = process.env.SPIKE_OUT || 'result';
+if (!/^[A-Za-z0-9_-]+$/.test(outputName)) throw new Error('SPIKE_OUT must contain only letters, numbers, underscores or hyphens');
+const outputDir = new URL('./results/', import.meta.url);
+mkdirSync(outputDir, { recursive: true });
+const outFile = new URL(`${outputName}.json`, outputDir).pathname;
 
 page.on('console', (message) => {
   if (message.type() === 'error') errors.push(`console: ${message.text()}`);
@@ -72,7 +76,7 @@ const abort = async (reason) => {
   const partial = await page
     .evaluate(() => ({ results: window.partialResults || [], failure: window.failure || null, done: Boolean(window.done) }))
     .catch(() => ({ results: [], failure: 'page unreachable', done: false }));
-  writeFileSync(outFile, JSON.stringify({ ticket, reason, errors, httpErrors, partial }, null, 2));
+  writeFileSync(outFile, JSON.stringify({ reason, errors, httpErrors, partial }, null, 2));
   console.error(`RUN FAILED: ${reason}`);
   for (const entry of httpErrors) console.error(`  ${entry}`);
   await browser.close();
@@ -141,11 +145,11 @@ const result = await page.evaluate(() => ({
   workerFailure: window.workerFailure,
   workerBoot: window.workerBoot
 }));
-await page.screenshot({ path: new URL('./screenshot.png', import.meta.url).pathname, fullPage: false });
-writeFileSync(outFile, JSON.stringify({ ticket, errors, httpErrors, clickDurations, clickFailures, ...result }, null, 2));
+await page.screenshot({ path: new URL('screenshot.png', outputDir).pathname, fullPage: false });
+writeFileSync(outFile, JSON.stringify({ errors, httpErrors, clickDurations, clickFailures, ...result }, null, 2));
 const cases = result.result ? result.result.results.length : 0;
 console.log(JSON.stringify({ done: finished, cases, errors: errors.length, clickFailures: clickFailures.length }));
 
 await browser.close();
 server.kill();
-if (!finished || errors.length || result.failure) process.exit(1);
+if (!finished || errors.length || clickFailures.length || result.failure || result.workerFailure) process.exit(1);

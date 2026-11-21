@@ -7,6 +7,7 @@ without probe overhead"). Synthetic data only; nothing here reads a vault.
 
 ```sh
 bun install
+bunx playwright install chromium
 ACON_ROOT=/path/to/agent-console bun run measure
 ```
 
@@ -22,11 +23,13 @@ Environment:
 - `SPIKE_CASES`: comma-separated label substrings; empty runs every arm.
 - `SPIKE_RUNS`: runs per arm, default 3 (2 for sustained arms).
 - `SPIKE_ITERATIONS`: per-frame iterations for the arms without their own cap, default 100.
-- `SPIKE_QUERY`: query string appended before the acon hash route, for example
-  `workerYield=timer`.
+- `SPIKE_QUERY`: configuration parsed by the driver and injected into the page; for example
+  `workerYield=timer`. It is not appended to the console URL.
 
-Output: `result.json` (per-arm distributions, click durations, errors) and `screenshot.png`.
-The driver exits non-zero on any HTTP 4xx/5xx, console error, page error or unfinished run.
+Output: `results/result.json` (per-arm distributions, click durations, errors) and `results/screenshot.png`.
+`SPIKE_OUT` selects the result basename using letters, numbers, underscores or hyphens.
+The ignored `results/` directory holds all output, and result JSON does not contain the ticket.
+The driver exits non-zero on any HTTP 4xx/5xx, console error, page error, worker failure, click failure or unfinished run.
 
 ## Arms
 
@@ -60,8 +63,8 @@ positions. A mode that uploads nothing scores an error equal to one iteration's 
 
 ## Metric definitions
 
-- Iteration: `performance.now()` around `iterate` (or `assign`) only. The movement probe is
-  computed outside it.
+- Iteration: `performance.now()` around `iterate` (or `assign`); Sigma arms also include
+  position write-back and refresh. The movement probe is computed outside the timed region.
 - Frame interval: start-to-start gap between consecutive `requestAnimationFrame` callbacks.
 - Click: a Playwright action on `#pulse`, a latency proxy that includes the driver's
   actionability checks, not browser Event Timing INP.

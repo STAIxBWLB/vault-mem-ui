@@ -326,6 +326,11 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
       window.workerBoot = message.href;
       return;
     }
+    if (message.type === 'failure') {
+      window.workerFailure = `worker failure: ${message.error || 'unknown error'}`;
+      for (const key of Object.keys(waiters)) waiters[key]({ type: 'error' });
+      return;
+    }
     if (message.type === 'batch') {
       latest = message;
       latestSeq += 1;
@@ -346,6 +351,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
     (window.__spikeConfig && window.__spikeConfig.yieldMode) || new URLSearchParams(location.search).get('workerYield') || 'channel';
   const cpuPromise = wait('cpu');
   worker.postMessage({ type: 'cpu' });
+  const cpuResult = await cpuPromise;
   const setupStart = performance.now();
   const readyPromise = wait('ready');
   worker.postMessage({ type: 'init', order, edgePairs: transfer.edgePairs, x: transfer.x, y: transfer.y, yieldMode, batchMs }, [
@@ -355,7 +361,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
   ]);
   const ready = await readyPromise;
   const setupMs = performance.now() - setupStart;
-  if (ready.type !== 'ready') throw new Error('worker init failed: ' + JSON.stringify(ready));
+  if (ready.type !== 'ready') { worker.terminate(); if (sigma) sigma.kill(); throw new Error(window.workerFailure || 'worker init failed: ' + JSON.stringify(ready)); }
 
   const frames = [];
   let appliedSeq = 0;
@@ -366,8 +372,9 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
   const t0 = performance.now();
   let prior = t0;
   for (let i = 0; maxFrames === null || i < maxFrames; i++) {
-    if (sustainMs && performance.now() - t0 >= sustainMs) break;
+    if (window.workerFailure || (sustainMs && performance.now() - t0 >= sustainMs)) break;
     await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (window.workerFailure) break;
     const frameStart = performance.now();
     frames.push(frameStart - prior);
     prior = frameStart;
@@ -394,10 +401,12 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
     if (workerDeltas.length >= PROXY_STREAK && workerDeltas.slice(-PROXY_STREAK).every((value) => value < PROXY_THRESHOLD)) break;
   }
   window.caseRunning = false;
+  if (window.workerFailure) { worker.terminate(); if (sigma) sigma.kill(); throw new Error(window.workerFailure); }
   const elapsed = performance.now() - t0;
   const stoppedPromise = wait('stopped', 60_000);
   worker.postMessage({ type: 'stop' });
   const stopped = await stoppedPromise;
+  if (stopped.type !== 'stopped') { worker.terminate(); if (sigma) sigma.kill(); throw new Error(window.workerFailure || 'worker did not stop'); }
   for (const value of stopped.iterations || []) workerTimings.push(value);
   if (stopped.gaps) for (const value of stopped.gaps) workerGaps.push(value);
   worker.terminate();
@@ -424,7 +433,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
     renderCostMs: renderCosts.length ? stats(renderCosts) : null,
     frameGapMs: stats(frames),
     framesMeasured: frames.length,
-    cpuBenchMs: (await cpuPromise).stats || null,
+    cpuBenchMs: cpuResult.stats || null,
     batches: transferBytes.length,
     transferBytes: transferBytes.length ? stats(transferBytes) : null,
     clicks: window.clicks,
