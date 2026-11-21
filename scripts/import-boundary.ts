@@ -6,8 +6,9 @@ const PANEL_ASSETS = new Set(["../../dist/panel.js", "../../dist/panel.css"]);
 /**
  * The filesystem exception is a read of exactly those two paths, so the check verifies the call rather than trusting
  * the file name: `readFileSync` name-imported from `node:fs`, called with a fixed asset path (a string literal, or
- * `new URL(<literal>, import.meta.url)`) and the `"utf8"` encoding. Another `node:fs` member, a variable path, a
- * write or a dynamic import is a violation in that file like it would be anywhere else.
+ * `new URL(<literal>, import.meta.url)`) and the `"utf8"` encoding. The binding may only appear as that call's callee:
+ * an alias, or a reference passed on, would carry the read out from under the path check. Another `node:fs` member, a
+ * variable path, a write or a dynamic import is a violation in that file like it would be anywhere else.
  */
 export function assetReadProblems(source: ts.SourceFile, filename: string): string[] {
   const problems: string[] = [];
@@ -42,6 +43,16 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
     // A dynamic import or require would reach every member of the module without naming one.
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
       problems.push(`${at(node)}: the panel asset reader may only name-import readFileSync`);
+    }
+    // The binding is usable only as the callee of one of those calls: an alias, a `Function.prototype` helper, or a
+    // reference handed to something else would carry the read out from under the path check.
+    if (ts.isIdentifier(node) && local.has(node.text)) {
+      const parent = node.parent;
+      const bindingSite = ts.isImportSpecifier(parent) && parent.name === node;
+      const callee = ts.isCallExpression(parent) && parent.expression === node;
+      if (!bindingSite && !callee) {
+        problems.push(`${at(node)}: readFileSync may only be called directly on a panel asset path, not aliased or passed on`);
+      }
     }
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && local.has(node.expression.text)) {
       const [target, encoding] = node.arguments;

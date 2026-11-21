@@ -50,6 +50,13 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nconst js = readFileSync(new URL("../../dist/panel.js", someBase), "utf8")', "a base that is not import.meta.url"],
   ['import { readdirSync } from "node:fs";\nreaddirSync("../../dist")', "another read-only member"],
   ['const fs = await import("node:fs");\nfs.readFileSync("../../dist/panel.js", "utf8")', "a dynamic import"],
+  // The binding itself: aliasing it, or handing it to something else, would move the read out from under the path check.
+  ['import { readFileSync } from "node:fs";\nconst read = readFileSync;\nread(vaultPath, "utf8")', "an alias called with a variable path"],
+  ['import { readFileSync } from "node:fs";\nconst read = readFileSync;\nread(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias called with the fixed path"],
+  ['import { readFileSync } from "node:fs";\nreadFileSync.apply(null, [vaultPath, "utf8"])', "a Function.prototype call"],
+  ['import { readFileSync } from "node:fs";\nconst read = readFileSync.bind(null);\nread(vaultPath, "utf8")', "a bound copy"],
+  ['import { readFileSync } from "node:fs";\nconst readers = [readFileSync];\nreaders[0](vaultPath, "utf8")', "a reference held in a list"],
+  ['import { readFileSync } from "node:fs";\nrun(readFileSync)', "a reference passed as an argument"],
 ];
 
 test("the panel asset reader may only read its two fixed dist paths", () => {
