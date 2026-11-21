@@ -6,8 +6,16 @@ import { parseMarkdown, safeHref, type Block, type Inline } from "./parse.ts";
 
 type OpenNote = (path: string) => void;
 
-/** What the provider resolved one written link to: a note path, or `null` when it could not resolve that link. */
-export type WikiIndex = Map<string, string | null>;
+/**
+ * What the provider answered for one written link: the note it resolved to, or why it could not and the note it
+ * suggests instead. `vmem_links` states both (`reason`, `suggested`), so the panel repeats them rather than writing a
+ * sentence of its own about a link it cannot see.
+ */
+export type WikiLink =
+  | { kind: "resolved"; path: string }
+  | { kind: "dead"; reason: string; suggested: string };
+
+export type WikiIndex = Map<string, WikiLink>;
 
 /**
  * The identity the provider resolves: the target and the anchor written with it. `[[Alpha]]` and `[[Alpha#gone]]` are
@@ -31,7 +39,10 @@ export function wikiIndex(links: unknown): WikiIndex {
     const link = rec(row);
     const target = str(link.target);
     if (!target) continue;
-    index.set(wikiKey(target, str(link.heading), str(link.block)), str(link.resolved) || null);
+    const resolved = str(link.resolved);
+    index.set(wikiKey(target, str(link.heading), str(link.block)), resolved
+      ? { kind: "resolved", path: resolved }
+      : { kind: "dead", reason: str(link.reason), suggested: str(rec(link.suggested).path) });
   }
   return index;
 }
@@ -174,13 +185,26 @@ function imageTarget(src: string): ReactNode {
   );
 }
 
+/** What vmem says it could not do, in the words the person reads beside the link. */
+const DEAD_WHY: Record<string, string> = {
+  "missing-note": "no note has this name",
+  "ambiguous-note": "more than one note has this name",
+  "missing-heading": "the note it names has no such heading",
+  "missing-block": "the note it names has no such block",
+};
+
+function deadTitle(target: string, answer: { reason: string; suggested: string }): string {
+  const why = DEAD_WHY[answer.reason] ?? "vmem could not resolve this link";
+  return answer.suggested ? `${target}: ${why}; vmem suggests ${answer.suggested}` : `${target}: ${why}`;
+}
+
 function Wiki(props: { node: Extract<Inline, { kind: "wiki" }>; wiki: WikiIndex; onOpenNote?: OpenNote }) {
   const node = props.node;
-  const resolved = props.wiki.get(wikiKey(node.target, node.heading, node.block));
+  const answer = props.wiki.get(wikiKey(node.target, node.heading, node.block));
   const kind = node.embed ? " vmem-md-wiki-embed" : "";
   // Absent from the answer is its own state: the link list is capped, so the panel says it cannot place the link rather
   // than calling a link broken that the provider never answered for.
-  if (resolved === undefined) {
+  if (!answer) {
     return (
       <span
         className={`vmem-md-wiki${kind} vmem-md-wiki-unknown`}
@@ -190,9 +214,9 @@ function Wiki(props: { node: Extract<Inline, { kind: "wiki" }>; wiki: WikiIndex;
       </span>
     );
   }
-  if (resolved === null) {
+  if (answer.kind === "dead") {
     return (
-      <span className={`vmem-md-wiki${kind} vmem-md-wiki-missing`} title={`${node.target}: vmem could not resolve this link`}>
+      <span className={`vmem-md-wiki${kind} vmem-md-wiki-missing`} title={deadTitle(node.target, answer)}>
         {node.label}
       </span>
     );
@@ -200,7 +224,7 @@ function Wiki(props: { node: Extract<Inline, { kind: "wiki" }>; wiki: WikiIndex;
   if (!props.onOpenNote) return <span className={`vmem-md-wiki${kind}`}>{node.label}</span>;
   const open = props.onOpenNote;
   return (
-    <button type="button" className={`vmem-md-wiki${kind}`} onClick={() => open(resolved)}>
+    <button type="button" className={`vmem-md-wiki${kind}`} onClick={() => open(answer.path)}>
       {node.label}
     </button>
   );
