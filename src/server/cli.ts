@@ -16,6 +16,8 @@ export interface RunOptions {
   err: (line: string) => void;
   /** Called with the exit code when the server stops on its own (idle). */
   exit: (code: number) => void;
+  /** Provider factory; tests replace it. Defaults to the vault-mem console plugin. */
+  open?: typeof plugin.open;
 }
 
 export const USAGE = `usage: vmem-ui [--port <n>] [--idle-minutes <n>]
@@ -48,7 +50,14 @@ export async function run(options: RunOptions): Promise<Host | null> {
   if ("error" in parsed) { options.err(`vmem-ui: ${parsed.error}`); return null; }
   if (parsed.help) { options.out(USAGE); return null; }
   const home = options.env.AGENTHUB_HOME ?? join(homedir(), ".agenthub");
-  const provider = await plugin.open({ home, log: (line) => options.err(line) });
+  let provider: Awaited<ReturnType<typeof plugin.open>>;
+  try {
+    provider = await (options.open ?? plugin.open.bind(plugin))({ home, log: (line) => options.err(line) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    options.err(`vmem-ui: could not open the vault-mem provider: ${msg}; check VMEM_HOME and AGENTHUB_HOME (absolute paths, readable vault registry), then run vmem-ui again`);
+    return null;
+  }
   let host: Host;
   try {
     host = startHost({

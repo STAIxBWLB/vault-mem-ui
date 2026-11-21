@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console/contract";
 import { CSP, startHost, type Host } from "../../src/server/host";
-import { parseArgs } from "../../src/server/cli";
+import { parseArgs, run } from "../../src/server/cli";
 import { boundaryViolations } from "../../scripts/import-boundary";
 
 // Synthetic provider: records every call so tests can prove the server relays and never confirms on its own.
@@ -137,10 +137,12 @@ test("bounds request bodies", async () => {
   const cookie = await signIn(host);
   const big = await post(host, "/api/action", { action: "delete", pad: "x".repeat(4096) }, { cookie });
   expect(big.status).toBe(413);
+  expect((await big.json()).error).toBe("request body is over the 1024 byte limit; send a smaller request");
   // A chunked body without Content-Length is cut off while reading.
   const stream = new ReadableStream({ start(c) { for (let i = 0; i < 8; i++) c.enqueue(new TextEncoder().encode("x".repeat(512))); c.close(); } });
   const chunked = await fetch(host.origin + "/api/action", { method: "POST", headers: { cookie, origin: host.origin, "content-type": "application/json" }, body: stream, duplex: "half" } as RequestInit);
   expect(chunked.status).toBe(413);
+  expect((await chunked.json()).error).toContain("over the 1024 byte limit; send a smaller request");
   const notJson = await post(host, "/api/action", "{nope", { cookie });
   expect(notJson.status).toBe(400);
   expect((await notJson.json()).error).toContain("not valid JSON");
@@ -204,6 +206,16 @@ test("exits after the idle timeout and stays up while used", async () => {
   await Bun.sleep(300);
   expect(idled).toBe(1);
   await expect(fetch(host.origin + "/", { headers: { cookie }, signal: AbortSignal.timeout(1000) })).rejects.toThrow();
+});
+
+test("provider initialization failure is reported with cause and next step, not thrown", async () => {
+  const errs: string[] = [];
+  const host = await run({
+    assets, argv: [], env: {}, out: () => {}, err: (l) => errs.push(l), exit: () => {},
+    open: async () => { throw new Error("VMEM_HOME must be an absolute path"); },
+  });
+  expect(host).toBeNull();
+  expect(errs).toEqual(["vmem-ui: could not open the vault-mem provider: VMEM_HOME must be an absolute path; check VMEM_HOME and AGENTHUB_HOME (absolute paths, readable vault registry), then run vmem-ui again"]);
 });
 
 test("command options refuse bad input with cause and next step", () => {
