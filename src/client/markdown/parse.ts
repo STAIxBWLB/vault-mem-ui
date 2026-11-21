@@ -301,9 +301,10 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
   if (depth >= MAX_INLINE_DEPTH) return text ? [{ kind: "text", text }] : [];
   const out: Inline[] = [];
   const delimiters = delimiterIndex(text);
-  // A `]` that never comes again means no bracket link can start from here on, so a note of unclosed `[` is read once
-  // instead of rescanning the rest of the text at every character (16 KiB of `[` took a few hundred ms).
-  const lastClose = text.lastIndexOf("]");
+  // Every `[` is paired with its closing `]` in this one pass, so a candidate link start is a lookup rather than a scan
+  // to the end of the text: a note of many `[` and a single `]` re-read the same tail from each opening, which took 1.9 s
+  // at 48 KB under V8 with the old guard (that guard only helped when no `]` existed at all).
+  const pairs = text.includes("[") ? bracketPairs(text) : null;
   const lastWiki = text.lastIndexOf("]]");
   let buffer = "";
   const flush = () => {
@@ -345,7 +346,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
     }
     if (char === "!" && text[at + 1] === "[") {
       const span = (lastWiki >= at + 3 ? wikiSpan(text, at) : null) ??
-        (lastClose >= at + 2 ? bracketLink(text, at, true, depth) : null);
+        (pairs ? bracketLink(text, at, true, depth, pairs) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -355,7 +356,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
     }
     if (char === "[" && links) {
       const span = (lastWiki >= at + 2 && text[at + 1] === "[" ? wikiSpan(text, at) : null) ??
-        (lastClose >= at + 1 ? bracketLink(text, at, false, depth) : null);
+        (pairs ? bracketLink(text, at, false, depth, pairs) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -433,25 +434,33 @@ function wikiSpan(text: string, at: number): Span | null {
   return { node: { kind: "wiki", target, heading, block, label: alias || address, embed }, end: close + 2 };
 }
 
-function bracketLink(text: string, at: number, image: boolean, depth: number): Span | null {
-  const open = at + (image ? 2 : 1);
-  let nested = 0;
-  let cursor = open;
-  for (; cursor < text.length; cursor += 1) {
-    const char = text[cursor]!;
+/**
+ * The `]` that closes each `[`, in one pass: `pairs[i]` is that index, or -1 when the bracket is never closed. The
+ * nesting rule is the one the label reader had: a `[` holds a `]` that arrived after it, so `[[a]](u)` labels `[a]`.
+ * An escaped character closes nothing.
+ */
+function bracketPairs(text: string): Int32Array {
+  const pairs = new Int32Array(text.length).fill(-1);
+  const open: number[] = [];
+  for (let at = 0; at < text.length; at += 1) {
+    const char = text[at]!;
     if (char === "\\") {
-      cursor += 1;
+      at += 1;
       continue;
     }
-    if (char === "[") nested += 1;
-    else if (char === "]") {
-      if (!nested) break;
-      nested -= 1;
-    }
+    if (char === "[") open.push(at);
+    else if (char === "]" && open.length) pairs[open.pop()!] = at;
   }
-  if (cursor >= text.length || text[cursor + 1] !== "(") return null;
-  const label = text.slice(open, cursor);
-  const inside = destination(text, cursor + 1);
+  return pairs;
+}
+
+function bracketLink(text: string, at: number, image: boolean, depth: number, pairs: Int32Array): Span | null {
+  const bracket = at + (image ? 1 : 0);
+  const open = bracket + 1;
+  const close = pairs[bracket]!;
+  if (close < 0 || text[close + 1] !== "(") return null;
+  const label = text.slice(open, close);
+  const inside = destination(text, close + 1);
   if (!inside) return null;
   const target = linkTarget(inside.dest);
   if (!target) return null;
