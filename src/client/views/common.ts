@@ -1,0 +1,13 @@
+/** What every panel view receives: its snapshot, the panel parameters, navigation and the write entry point. */
+
+import type { ActionInput, SnapshotReply } from "../host.ts";
+
+export interface ViewProps {
+  reply: SnapshotReply;
+  params: Record<string, string>;
+  navigate(panel: string, params?: Record<string, string>): void;
+  beginWrite(input: ActionInput): void;
+}
+
+export const vaultParam = (params: Record<string, string>): Record<string, string> =>
+  params.vault ? { vault: params.vault } : {};

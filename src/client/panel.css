@@ -1,1 +1,442 @@
-/* Panel styles follow with the client implementation. */
+/* The panel's one stylesheet. Colour comes from acon's tokens when the console supplies them and from the
+   fallbacks below in the standalone host; the person's own light/dark choice overrides both. */
+
+.vmem-root {
+  height: 100%;
+}
+
+.vmem {
+  --vmem-bg: var(--acon-bg, #ffffff);
+  --vmem-surface: var(--acon-surface, #f7f8fa);
+  --vmem-text: var(--acon-text, #14181f);
+  --vmem-text-2: var(--acon-text-2, #5a6472);
+  --vmem-line: var(--acon-line, #e3e7ee);
+  --vmem-line-2: var(--acon-line-2, #cfd6e2);
+  --vmem-accent: var(--acon-accent, #2456aa);
+  --vmem-danger: var(--acon-danger, #b3261e);
+  --vmem-warn: var(--acon-warn, #8a5a00);
+  --vmem-radius: var(--acon-radius-2, 8px);
+  --vmem-space-2: var(--acon-space-2, 8px);
+  --vmem-space-3: var(--acon-space-3, 12px);
+  --vmem-space-4: var(--acon-space-4, 16px);
+  --vmem-mono: var(--acon-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-3);
+  height: 100%;
+  padding: var(--vmem-space-3);
+  box-sizing: border-box;
+  background: var(--vmem-bg);
+  color: var(--vmem-text);
+  font: inherit;
+  word-break: keep-all;
+}
+
+.vmem[data-theme="dark"] {
+  --vmem-bg: #11151b;
+  --vmem-surface: #171c24;
+  --vmem-text: #e7ecf3;
+  --vmem-text-2: #9aa4b2;
+  --vmem-line: #242c38;
+  --vmem-line-2: #313b4a;
+  --vmem-accent: #7aa2f7;
+  --vmem-danger: #f07a72;
+  --vmem-warn: #e3b341;
+}
+
+.vmem-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vmem-space-2);
+  border-bottom: 1px solid var(--vmem-line);
+  padding-bottom: var(--vmem-space-2);
+}
+
+.vmem-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.vmem-nav-item {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--vmem-radius);
+  background: transparent;
+  color: var(--vmem-text-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.vmem-nav-item:hover {
+  color: var(--vmem-text);
+  background: var(--vmem-surface);
+}
+
+.vmem-nav-current {
+  color: var(--vmem-text);
+  border-color: var(--vmem-line-2);
+  background: var(--vmem-surface);
+  font-weight: 600;
+}
+
+.vmem-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-3);
+  min-height: 0;
+  overflow: auto;
+}
+
+.vmem-hint {
+  margin: 0;
+}
+
+.vmem-sub {
+  margin: 0;
+  color: var(--vmem-text-2);
+  font-size: 13px;
+}
+
+.vmem-footer {
+  font-family: var(--vmem-mono);
+  font-size: 12px;
+}
+
+.vmem-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-input {
+  min-height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid var(--vmem-line-2);
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-bg);
+  color: var(--vmem-text);
+  font: inherit;
+}
+
+.vmem-input:focus-visible,
+.vmem-button:focus-visible,
+.vmem-row:focus-visible,
+.vmem-nav-item:focus-visible {
+  outline: 2px solid var(--vmem-accent);
+  outline-offset: 2px;
+}
+
+.vmem-search {
+  flex: 1 1 240px;
+  max-width: 480px;
+}
+
+.vmem-button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--vmem-line-2);
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-surface);
+  color: var(--vmem-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.vmem-button:hover {
+  border-color: var(--vmem-accent);
+}
+
+.vmem-button-danger {
+  color: var(--vmem-danger);
+  border-color: var(--vmem-danger);
+}
+
+.vmem-button-primary {
+  border-color: var(--vmem-accent);
+  color: var(--vmem-accent);
+}
+
+.vmem-label {
+  color: var(--vmem-text-2);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vmem-required {
+  text-transform: none;
+}
+
+.vmem-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+}
+
+.vmem-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--vmem-text-2);
+  font-size: 13px;
+}
+
+.vmem-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+  gap: var(--vmem-space-4);
+}
+
+.vmem-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-2);
+  padding: var(--vmem-space-3);
+  border: 1px solid var(--vmem-line);
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-surface);
+}
+
+.vmem-card-title,
+.vmem-dialog-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.vmem-form {
+  max-width: 560px;
+  background: var(--vmem-surface);
+}
+
+.vmem-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.vmem-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-row {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--vmem-space-2);
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--vmem-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.vmem-row:hover {
+  border-color: var(--vmem-line);
+  background: var(--vmem-surface);
+}
+
+.vmem-row-static {
+  cursor: default;
+}
+
+.vmem-row-title {
+  grid-column: 1;
+  overflow-wrap: anywhere;
+}
+
+.vmem-row-sub {
+  grid-column: 1;
+  color: var(--vmem-text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.vmem-row .vmem-chip {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.vmem-row-verbs {
+  display: flex;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-chip {
+  justify-self: end;
+  align-self: start;
+  padding: 1px 8px;
+  border: 1px solid var(--vmem-line-2);
+  border-radius: 999px;
+  color: var(--vmem-text-2);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.vmem-chip-warn {
+  color: var(--vmem-warn);
+  border-color: var(--vmem-warn);
+}
+
+.vmem-chip-err {
+  color: var(--vmem-danger);
+  border-color: var(--vmem-danger);
+}
+
+.vmem-notice {
+  margin: 0;
+  padding: var(--vmem-space-2) var(--vmem-space-3);
+  border: 1px solid var(--vmem-line-2);
+  border-left-width: 3px;
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-surface);
+}
+
+.vmem-notice-warn {
+  border-left-color: var(--vmem-warn);
+}
+
+.vmem-notice-err {
+  border-left-color: var(--vmem-danger);
+  color: var(--vmem-danger);
+}
+
+.vmem-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--vmem-space-4);
+  border: 1px dashed var(--vmem-line-2);
+  border-radius: var(--vmem-radius);
+  text-align: center;
+}
+
+.vmem-empty-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.vmem-detail-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.vmem-detail-title {
+  margin: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.vmem-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-2);
+}
+
+.vmem-body {
+  margin: 0;
+  padding: var(--vmem-space-3);
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--vmem-surface);
+  border: 1px solid var(--vmem-line);
+  border-radius: var(--vmem-radius);
+  font: 13px/1.5 var(--vmem-mono);
+}
+
+.vmem-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--vmem-space-4);
+  background: rgba(8, 10, 14, 0.45);
+}
+
+.vmem-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vmem-space-3);
+  width: min(620px, 100%);
+  max-height: 80vh;
+  overflow: auto;
+  padding: var(--vmem-space-4);
+  border: 1px solid var(--vmem-line-2);
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-bg);
+  color: var(--vmem-text);
+}
+
+.vmem-changes,
+.vmem-warnings {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--vmem-mono);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.vmem-warnings {
+  color: var(--vmem-warn);
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.vmem kbd {
+  padding: 0 4px;
+  border: 1px solid var(--vmem-line-2);
+  border-radius: 4px;
+  font-family: var(--vmem-mono);
+  font-size: 11px;
+}
+
+/* Reduced motion: the person's switch, or the system preference the client mirrors. */
+.vmem[data-motion="reduced"] * {
+  transition: none !important;
+  animation: none !important;
+}
+
+@media (max-width: 600px) {
+  .vmem-inline {
+    width: 100%;
+  }
+  .vmem-inline .vmem-input {
+    flex: 1;
+  }
+}
