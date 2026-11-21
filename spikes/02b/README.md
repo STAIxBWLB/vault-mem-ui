@@ -66,8 +66,8 @@ positions. A mode that uploads nothing scores an error equal to one iteration's 
 - Iteration: `performance.now()` around `iterate` (or `assign`); Sigma arms also include
   position write-back and refresh. The movement probe is computed outside the timed region.
 - Frame interval: start-to-start gap between consecutive `requestAnimationFrame` callbacks.
-- Click: a Playwright action on `#pulse`, a latency proxy that includes the driver's
-  actionability checks, not browser Event Timing INP.
+- Click: a Playwright action on `#pulse`, a latency proxy with `force: true`, which skips Playwright actionability checks,
+  not browser Event Timing INP.
 - Handler lag: `performance.now() - event.timeStamp` inside a `pointerdown` listener.
 - Movement proxy: `sqrt(sum(|p_new - p_old|^2) / sum(|p_new|^2))`, first of five consecutive
   steps below 0.01. Origin dependent and not a usability threshold. In worker arms it is

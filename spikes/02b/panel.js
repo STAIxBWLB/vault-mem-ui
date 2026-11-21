@@ -352,6 +352,7 @@ async function runWorkerCase({ label, order, edgeSet, render, maxFrames, sustain
   const cpuPromise = wait('cpu');
   worker.postMessage({ type: 'cpu' });
   const cpuResult = await cpuPromise;
+  if (cpuResult.type !== 'cpu') { worker.terminate(); if (sigma) sigma.kill(); throw new Error(window.workerFailure || 'worker CPU probe timed out'); }
   const setupStart = performance.now();
   const readyPromise = wait('ready');
   worker.postMessage({ type: 'init', order, edgePairs: transfer.edgePairs, x: transfer.x, y: transfer.y, yieldMode, batchMs }, [

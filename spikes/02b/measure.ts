@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 
 // Drives the page: reads per-case progress from window.partialResults, clicks #pulse every
-// 50 ms while a case runs, and fails the run on any HTTP 4xx/5xx or console/page error, so a
+// after each click waits 50 ms while a case runs, and fails the run on any HTTP 4xx/5xx or console/page error, so a
 // dirty run cannot be reported as a clean one.
 const server = Bun.spawn(['bun', 'server.ts'], {
   cwd: import.meta.dir,
@@ -10,13 +10,20 @@ const server = Bun.spawn(['bun', 'server.ts'], {
   stderr: 'inherit',
   env: { ...process.env }
 });
+let browser;
+try {
 const decoder = new TextDecoder();
 const reader = server.stdout.getReader();
 let buffered = '';
 let ticket = null;
 const deadline = Date.now() + 60_000;
 while (!ticket && Date.now() < deadline) {
-  const { value, done } = await reader.read();
+  const remaining = deadline - Date.now();
+  let timer;
+  const { value, done } = await Promise.race([
+    reader.read(),
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('acon fixture ticket timed out')), remaining); })
+  ]).finally(() => clearTimeout(timer));
   if (done) break;
   buffered += decoder.decode(value);
   const line = buffered.split('\n').find((entry) => entry.includes('"url"'));
@@ -27,7 +34,7 @@ if (!ticket) throw new Error('acon fixture server did not print a ticket URL: ' 
 const glArgs = process.env.GL_ARGS
   ? process.env.GL_ARGS.split(' ').filter(Boolean)
   : ['--use-gl=angle', '--use-angle=metal'];
-const browser = await chromium.launch({ headless: true, args: glArgs });
+browser = await chromium.launch({ headless: true, args: glArgs });
 const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 // The console rewrites the URL hash on login, so case filters travel as an injected config
 // rather than as query parameters.
@@ -79,9 +86,7 @@ const abort = async (reason) => {
   writeFileSync(outFile, JSON.stringify({ reason, errors, httpErrors, partial }, null, 2));
   console.error(`RUN FAILED: ${reason}`);
   for (const entry of httpErrors) console.error(`  ${entry}`);
-  await browser.close();
-  server.kill();
-  process.exit(1);
+  throw new Error(`RUN FAILED: ${reason}`);
 };
 
 // The ticket is single use and rides in the hash. Loading the console at `/` without it makes
@@ -150,6 +155,14 @@ writeFileSync(outFile, JSON.stringify({ errors, httpErrors, clickDurations, clic
 const cases = result.result ? result.result.results.length : 0;
 console.log(JSON.stringify({ done: finished, cases, errors: errors.length, clickFailures: clickFailures.length }));
 
-await browser.close();
-server.kill();
-if (!finished || errors.length || clickFailures.length || result.failure || result.workerFailure) process.exit(1);
+if (!finished || !cases || errors.length || clickFailures.length || result.failure || result.workerFailure) {
+  throw new Error('measurement failed or no cases matched; inspect the result for details');
+}
+} finally {
+  try {
+    if (browser) await browser.close();
+  } finally {
+    server.kill();
+    await server.exited;
+  }
+}
