@@ -175,6 +175,13 @@ describe("vault text cannot become markup", () => {
     }
   });
 
+  test("a delimiter run with nothing between its characters stays literal text", () => {
+    // `****` can open and close at the same character, which built an empty <strong> and ate the four asterisks.
+    const markup = html("a **** b");
+    expect(markup).not.toContain("<strong></strong>");
+    expect(markup).toContain("a **** b");
+  });
+
   test("an allowed link leaves the panel with no opener and no referrer", () => {
     const markup = html("[site](https://example.test/a?b=1) and <mailto:someone@example.test>");
     expect(markup).toContain('href="https://example.test/a?b=1"');
@@ -183,12 +190,13 @@ describe("vault text cannot become markup", () => {
     expect(markup.match(/rel="noopener noreferrer"/g)?.length).toBe(2);
   });
 
-  test("a link inside a link label stays one anchor: the inner link wins, the outer stays text", () => {
+  test("a link inside a link label stays one anchor: the outer link wins and the inner one is text", () => {
     const markup = html("[outer [inner](https://example.test/in)](https://example.test/out)");
     expect(markup.match(/<a[\s>]/g)?.length).toBe(1);
-    expect(markup).toContain('href="https://example.test/in"');
-    expect(markup).not.toContain('href="https://example.test/out"');
-    expect(markup).toContain("[outer ");
+    expect(markup).toContain('href="https://example.test/out"');
+    // The label is read with links off, so the inner link keeps the characters it was written with.
+    expect(markup).not.toContain('href="https://example.test/in"');
+    expect(markup).toContain("[inner](https://example.test/in)");
   });
 });
 
@@ -292,6 +300,52 @@ describe("wiki-links are read from the provider's own resolution", () => {
     expect(html("[[Alpha]]", bare)).toContain("vmem could not resolve this link");
   });
 
+  test("a link to the note the body belongs to is keyed by its empty target", () => {
+    // vmem answers `[[#Heading]]` and `[[#^block]]` with `target: ""`, meaning the note the body belongs to; the map
+    // used to drop those rows, so both states rendered as unlisted.
+    const self = {
+      out: [{ target: "", heading: "Design", block: null, resolved: "notes/a.md" }],
+      dead: [{ target: "", heading: null, block: "b1", resolved: null, reason: "missing-block", suggested: null }],
+    };
+    const index = wikiIndex(self);
+    expect(index.get(wikiKey("", "Design", ""))).toEqual({ kind: "resolved", path: "notes/a.md" });
+    expect(index.get(wikiKey("", "", "b1"))).toEqual({ kind: "dead", reason: "missing-block", suggested: "" });
+
+    const markup = html("[[#Design]] and [[#^b1]]", self);
+    expect(markup).toContain('<button type="button" class="vmem-md-wiki">#Design</button>');
+    expect(markup).toContain("this note: the note it names has no such block");
+    expect(markup).not.toContain("vmem-md-wiki-unknown");
+  });
+
+  test("a target past the provider's own bound keys the way the provider answered it", () => {
+    // `vmem_links` answers with each of target, heading and block cut at 1024 UTF-8 bytes, so the note's own spelling
+    // has to be cut the same way or a long link never matches its own answer.
+    const ascii = "a".repeat(1100);
+    const hangul = "가".repeat(600);
+    const answer = {
+      out: [
+        { target: ascii.slice(0, 1024), heading: null, block: null, resolved: "notes/ascii.md" },
+        // 1024 bytes is 341 of these characters (1023 bytes): the cut lands on a character boundary, not mid-character.
+        { target: "가".repeat(341), heading: null, block: null, resolved: "notes/hangul.md" },
+      ],
+    };
+    const markup = html(`[[${ascii}]] and [[${hangul}]]`, answer);
+    expect(markup.match(/<button type="button" class="vmem-md-wiki">/g)?.length).toBe(2);
+    expect(markup).not.toContain("vmem-md-wiki-unknown");
+  });
+
+  test("a reason a tooltip would hide is tied to the link for a keyboard and a screen reader", () => {
+    const markup = html("[[Missing]]", {
+      dead: [{ target: "Missing", heading: null, block: null, resolved: null, reason: "missing-note" }],
+    });
+    const described = /aria-describedby="([^"]+)"/.exec(markup);
+    expect(described).not.toBeNull();
+    expect(markup).toContain(`id="${described![1]}"`);
+    expect(markup).toContain("Missing: no note has this name");
+    // The description is separate from the label, so the link still reads as what the note wrote.
+    expect(markup).toContain(">Missing</span>");
+  });
+
   test("a table keeps the escape vmem's own scan sees, so the link keys the same way", () => {
     const table = "| link |\n| --- |\n| [[A\\|alias]] |";
     const cell = parseMarkdown(table)[0];
@@ -383,6 +437,12 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       "  const blocks = parseMarkdown(text);",
       '  if (!blocks.length) throw new Error("no blocks");',
       "}",
+      // The same engine check for the nested-label chain: exponential work is only visible as time, not as a throw.
+      'const nested = "[".repeat(3000) + "x" + "](http://a)".repeat(3000);',
+      "const start = Date.now();",
+      "const blocks = parseMarkdown(nested);",
+      'if (!blocks.length) throw new Error("no blocks");',
+      'if (Date.now() - start > 2000) throw new Error("nested labels took " + (Date.now() - start) + " ms");',
       'console.log("ok");',
     ].join("\n");
     const run = Bun.spawnSync([Bun.which("node")!, "--input-type=module", "-e", script]);
@@ -395,6 +455,60 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
     const nodes = parseInline("*a ".repeat(5400));
     expect(nodes.length).toBeGreaterThan(0);
     expect(nodes.every((node) => node.kind === "text")).toBe(true);
+  });
+});
+
+describe("a pathological note takes bounded work", () => {
+  const took = (fn: () => void): number => {
+    const start = performance.now();
+    fn();
+    return performance.now() - start;
+  };
+
+  test("a chain of nested labels is read once per level, never doubled", () => {
+    const depth = 3000;
+    const source = "[".repeat(depth) + "x" + "](http://a)".repeat(depth);
+    let blocks: Block[] = [];
+    // Before: 320 ms at depth 20 and still running after 3 minutes at 3000. The bound is loose for a slow machine and
+    // far under any form that doubles per level.
+    const ms = took(() => {
+      blocks = parseMarkdown(source);
+    });
+    expect({ depth, blocks: blocks.length }).toEqual({ depth, blocks: 1 });
+    expect(html(source)).toContain("x");
+    expect({ depth, under: ms < 2000 }).toEqual({ depth, under: true });
+  });
+
+  test("a blank run inside a list item is read once, however deep the item is", () => {
+    const body = (levels: number): string => {
+      const lines: string[] = [];
+      for (let level = 0; level < levels; level += 1) lines.push(`${"  ".repeat(level)}- x`);
+      lines.push("", ...Array(16000).fill(""), `${"  ".repeat(levels)}y`);
+      return lines.join("\n");
+    };
+    for (const levels of [1, 31]) {
+      const source = body(levels);
+      let blocks: Block[] = [];
+      // Before: 295 ms at one level and 9 s at 31, because every blank line re-read the rest of the run.
+      const ms = took(() => {
+        blocks = parseMarkdown(source);
+      });
+      expect({ levels, blocks: blocks.length > 0 }).toEqual({ levels, blocks: true });
+      expect({ levels, kept: html(source).includes("y") }).toEqual({ levels, kept: true });
+      expect({ levels, under: ms < 4000 }).toEqual({ levels, under: true });
+    }
+  });
+
+  test("unclosed brackets are not rescanned once no close is left", () => {
+    const source = "[".repeat(64 * 1024);
+    let nodes = 0;
+    // Before: 215 ms at 16 KiB and 3.4 s at 64 KiB, because every `[` scanned to the end of the text; with the guard the
+    // same input is a single pass, so the bound sits well under the old cost and far over the new one.
+    const ms = took(() => {
+      nodes = parseInline(source).length;
+    });
+    expect({ length: source.length, nodes }).toEqual({ length: 64 * 1024, nodes: 1 });
+    expect({ under: ms < 1000 }).toEqual({ under: true });
   });
 });
 
