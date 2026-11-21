@@ -10,16 +10,19 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseMarkdown, safeHref } from "../../src/client/markdown/parse.ts";
-import { Markdown, wikiIndex } from "../../src/client/markdown/render.tsx";
+import { Markdown, wikiIndex, wikiKey } from "../../src/client/markdown/render.tsx";
 import { NoteView } from "../../src/client/views/note.tsx";
 
 const html = (text: string, links?: unknown): string =>
   renderToStaticMarkup(<Markdown text={text} links={links} onOpenNote={() => {}} />);
 
-/** What the provider answers for `vmem_links`: resolved targets under `out`, unresolved ones under `dead`. */
+/** What the provider answers for `vmem_links`: resolved links under `out`, unresolved ones under `dead`. */
 const links = {
-  out: [{ target: "Beta", resolved: "notes/beta.md" }],
-  dead: [{ target: "Missing", resolved: null }],
+  out: [
+    { target: "Beta", heading: null, block: null, resolved: "notes/beta.md" },
+    { target: "Beta", heading: "Design", block: null, resolved: "notes/beta.md" },
+  ],
+  dead: [{ target: "Missing", heading: null, block: null, resolved: null }],
 };
 
 describe("parseMarkdown", () => {
@@ -181,12 +184,48 @@ describe("vault text cannot become markup", () => {
 });
 
 describe("wiki-links are read from the provider's own resolution", () => {
-  test("the payload becomes a target-to-path map, and an unlisted target is unresolved", () => {
+  test("the payload is keyed by the link, not by the note, so one target can be two answers", () => {
     const index = wikiIndex(links);
-    expect(index.get("Beta")).toBe("notes/beta.md");
-    expect(index.get("Missing")).toBeNull();
+    expect(index.get(wikiKey("Beta", "", ""))).toBe("notes/beta.md");
+    expect(index.get(wikiKey("Missing", "", ""))).toBeNull();
+    expect(index.has(wikiKey("NotListed", "", ""))).toBe(false);
     expect(wikiIndex(undefined).size).toBe(0);
-    expect(wikiIndex({ out: [{ target: "Beta", resolved: "notes/beta.md" }] }).get("Beta")).toBe("notes/beta.md");
+    // A null anchor in the payload and no anchor in the note are the same link.
+    const bare = wikiIndex({ out: [{ target: "Beta", heading: null, block: null, resolved: "notes/beta.md" }] });
+    expect(bare.get(wikiKey("Beta", "", ""))).toBe("notes/beta.md");
+  });
+
+  test("the review's reproduction: a resolved link and a dead one to the same note stay apart", () => {
+    const mixed = {
+      out: [{ target: "Alpha", heading: null, block: null, resolved: "notes/a.md" }],
+      dead: [{ target: "Alpha", heading: "missing", block: null, resolved: null }],
+    };
+    expect(wikiIndex(mixed).get(wikiKey("Alpha", "", ""))).toBe("notes/a.md");
+    expect(wikiIndex(mixed).get(wikiKey("Alpha", "missing", ""))).toBeNull();
+
+    const markup = html("[[Alpha]] and [[Alpha#missing]]", mixed);
+    expect(markup.match(/<button type="button" class="vmem-md-wiki">/g)?.length).toBe(1);
+    expect(markup).toContain('<button type="button" class="vmem-md-wiki">Alpha</button>');
+    expect(markup).toContain("vmem-md-wiki-missing");
+    expect(markup).toContain("vmem could not resolve this link");
+  });
+
+  test("a block reference is its own identity too", () => {
+    const paragraph = parseMarkdown("[[Alpha#^b1]]")[0];
+    expect(paragraph?.kind === "paragraph" ? paragraph.children[0] : undefined).toEqual({
+      kind: "wiki",
+      target: "Alpha",
+      heading: "",
+      block: "b1",
+      label: "Alpha#^b1",
+      embed: false,
+    });
+    const deadBlock = { dead: [{ target: "Alpha", heading: null, block: "b1", resolved: null }] };
+    expect(html("[[Alpha#^b1]]", deadBlock)).toContain("vmem-md-wiki-missing");
+    // An answer for the bare target does not speak for the block link.
+    const bareTarget = { dead: [{ target: "Alpha", heading: null, block: null, resolved: null }] };
+    expect(html("[[Alpha#^b1]]", bareTarget)).not.toContain("vmem-md-wiki-missing");
+    expect(html("[[Alpha#^b1]]", bareTarget)).toContain("vmem-md-wiki-unknown");
   });
 
   test("a resolved link is a button, in all three spellings, that opens the resolved note", () => {
@@ -197,13 +236,21 @@ describe("wiki-links are read from the provider's own resolution", () => {
     expect(markup).not.toContain("vmem-md-wiki-missing");
   });
 
-  test("an unresolved target looks different and is not something to click", () => {
-    for (const source of ["[[Missing]]", "[[NotListed]]"]) {
-      const markup = html(source, links);
-      expect(markup).toContain("vmem-md-wiki-missing");
-      expect(markup).not.toContain("<button");
-      expect(markup).toContain("vmem could not resolve this link");
-    }
+  test("a link the provider could not resolve looks different and is not something to click", () => {
+    const markup = html("[[Missing]]", links);
+    expect(markup).toContain("vmem-md-wiki-missing");
+    expect(markup).not.toContain("<button");
+    expect(markup).toContain("vmem could not resolve this link");
+  });
+
+  test("a link the capped answer never listed is unknown, not broken", () => {
+    const markup = html("[[NotListed]]", links);
+    expect(markup).toContain("vmem-md-wiki-unknown");
+    expect(markup).not.toContain("vmem-md-wiki-missing");
+    expect(markup).not.toContain("<button");
+    // It says what the panel knows: the list it was given does not include this link.
+    expect(markup).toContain("link list does not include it");
+    expect(markup).not.toContain("could not resolve");
   });
 
   test("an embed is a link to its note, marked as an embed, because the panel fetches nothing else", () => {
