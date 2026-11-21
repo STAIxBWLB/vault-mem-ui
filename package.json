@@ -7,6 +7,9 @@
   "engines": {
     "bun": ">=1.4.2"
   },
+  "bin": {
+    "vmem-ui": "bin/vmem-ui.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
