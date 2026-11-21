@@ -221,12 +221,16 @@ function parseList(lines: string[], start: number, first: Head, blocks: Block[],
     while (at < lines.length) {
       const next = lines[at]!;
       if (!next.trim()) {
-        // Blank lines stay in the item only while something indented enough follows them.
+        // Blank lines stay in the item only while something indented enough follows them. The run is read once and
+        // kept whole: adding it a line at a time re-read the rest of the run for every blank line, so a note of blank
+        // lines cost the square of its length at every nesting level.
         let look = at;
         while (look < lines.length && !lines[look]!.trim()) look += 1;
         if (look >= lines.length || leadingSpaces(lines[look]!) < head.indent) break;
-        content.push("");
-        at += 1;
+        while (at < look) {
+          content.push("");
+          at += 1;
+        }
         continue;
       }
       if (leadingSpaces(next) < head.indent) break;
