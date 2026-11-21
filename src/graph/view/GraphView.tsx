@@ -14,6 +14,7 @@ import type { GraphInput } from "../types";
 import { hashPosition, loadCanvasDeps, mountGraphCanvas, type CanvasDeps, type GraphCanvasHandle } from "./canvas";
 import type { CacheStorage } from "./cache";
 import { LOD_EDGE_THRESHOLD } from "./lod";
+import { GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend } from "./SidePanels";
 import { createGraphViewStore, type GraphViewStore, type LayoutStatus } from "./state";
 
 /** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph).
@@ -228,6 +229,12 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         aria-describedby="vmem-graph-selected"
         onKeyDown={onKey}
       />
+      <aside className="vmem-graph-sidebar" aria-label="Graph details">
+        <GraphFilterPanel state={state} store={store} />
+        <GraphLegend state={state} />
+        <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />
+        <GraphInsightsPanel model={state.derived.analysisModel} select={(id) => store.select(id)} />
+      </aside>
       <p id="vmem-graph-selected" className="vmem-sub" aria-live="polite">
         {selected ? `${selected.label}${selected.relPath ? "" : " (unresolved link)"} · ${selected.degree} links${state.path ? ` · path of ${state.path.length - 1} steps` : ""}` : "No note selected"}
       </p>

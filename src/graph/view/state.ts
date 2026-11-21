@@ -36,6 +36,8 @@ export interface GraphViewState {
   layout: LayoutStatus;
   cameraRatio: number;
   derived: DerivedGraph;
+  profile: GraphFilterProfile;
+  search: string;
   lod: Lod;
 }
 
@@ -58,6 +60,8 @@ export interface GraphViewStore {
   pathTo(id: string | null): void;
   togglePin(id: string): void;
   setColorByCommunity(on: boolean): void;
+  setProfile(profile: GraphFilterProfile): void;
+  setSearch(search: string): void;
   setCamera(ratio: number): void;
   setLayout(status: LayoutStatus): void;
   /** Moves the selection to the next/previous visible neighbour (keyboard). */
@@ -74,16 +78,17 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   const cacheKey = graphTopologySignature(model.nodes, model.edges);
   const cached = readLayoutCache(options.storage, cacheKey);
   const ids = new Set(model.nodes.map((n) => n.id));
-  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3) => deriveGraphView({
-    model, profile: OPEN_PROFILE, generatedPatterns: [], mode, focusNodeId: focusId,
-    localDepth: depth, localDirection: "both", search: "", searchAsFilter: false,
+  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3, profile: GraphFilterProfile, search: string) => deriveGraphView({
+    model, profile, generatedPatterns: [], mode, focusNodeId: focusId,
+    localDepth: depth, localDirection: "both", search, searchAsFilter: true,
   });
   let state: GraphViewState = {
     mode: "global", focusId: null, localDepth: 2, selectedId: null, hoverId: null,
     pathSourceId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
     pinned: new Set(cached.pinned.filter((id) => ids.has(id))),
     layout: { kind: "idle" }, cameraRatio: 1,
-    derived: derive("global", null, 2),
+    profile: { ...OPEN_PROFILE }, search: "",
+    derived: derive("global", null, 2, OPEN_PROFILE, ""),
     lod: lodFor(model.edges.length, { ratio: 1, layoutRunning: false }),
   };
   let positions = cached.positions;
@@ -108,7 +113,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     openLocal(id, depth = state.localDepth) {
       if (!known(id)) return;
       const mode: ViewMode = id === null ? "global" : "local";
-      set({ mode, focusId: id, localDepth: depth, selectedId: id ?? state.selectedId, derived: derive(mode, id, depth) });
+      set({ mode, focusId: id, localDepth: depth, selectedId: id ?? state.selectedId, derived: derive(mode, id, depth, state.profile, state.search) });
     },
     pathTo(id) {
       if (id === null) return set({ pathSourceId: null, path: null, pathMissing: false });
@@ -125,6 +130,12 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       writeLayoutCache(options.storage, cacheKey, { positions, pinned: [...pinned] });
     },
     setColorByCommunity(on) { set({ colorByCommunity: on && model.enriched }); },
+    setProfile(profile) {
+      set({ profile, derived: derive(state.mode, state.focusId, state.localDepth, profile, state.search) });
+    },
+    setSearch(search) {
+      set({ search, derived: derive(state.mode, state.focusId, state.localDepth, state.profile, search) });
+    },
     setCamera(ratio) { if (Number.isFinite(ratio) && ratio > 0 && ratio !== state.cameraRatio) set({ cameraRatio: ratio }); },
     setLayout(layout) { set({ layout }); },
     step(direction) {

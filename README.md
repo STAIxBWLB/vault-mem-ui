@@ -23,6 +23,10 @@ For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run ch
 
 The `acon` plugin in `src/plugin` keeps `@staix/vault-mem/ui-plugin`'s provider — and so vmem's validation, receipts and two-step confirmation — and replaces only the panel assets with this bundle. It reads `dist/`, so run `bun run build` before starting the console; `bun run check` builds first for the same reason.
 
+## Graph controls
+
+The graph view provides search, domain, type, relation and community filters, a legend, a selected-note inspector and read-only insights. Possible-link analysis is limited to graphs with at most 30,000 edges; narrow larger graphs with filters. The provider graph snapshot is still pending (vault-mem #266).
+
 ## Scope
 
 - Runs standalone on loopback and inside `acon`, from one bundle.
