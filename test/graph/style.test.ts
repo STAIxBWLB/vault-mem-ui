@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
   communityColor,
   domainColor,
@@ -26,9 +26,7 @@ const node = (over: Partial<GraphNode>): GraphNode => ({
 // refreshGraphTheme reads. (maru ran this file under jsdom with root.style.setProperty.)
 let tokens: Record<string, string> = {};
 const g = globalThis as Record<string, unknown>;
-g.window ??= globalThis;
-g.document ??= { documentElement: {} };
-g.getComputedStyle = () => ({ backgroundColor: "", getPropertyValue: (name: string) => tokens[name] ?? "" });
+const previous = new Map<string, PropertyDescriptor | undefined>();
 
 function setTokens(next: Record<string, string>) {
   tokens = { ...next };
@@ -38,6 +36,19 @@ const LIGHT = { "--graph-canvas": "#f4f3ee", "--graph-ink": "#1f1d18", "--graph-
 const DARK = { "--graph-canvas": "#1e1e1e", "--graph-ink": "#f2f0e8", "--graph-muted": "#8f918c", "--graph-line": "#30322f", "--graph-accent": "#8b5cf6" };
 
 describe("graph theme", () => {
+  beforeAll(() => {
+    for (const key of ["window", "document", "getComputedStyle"]) previous.set(key, Object.getOwnPropertyDescriptor(g, key));
+    g.window ??= globalThis;
+    g.document ??= { documentElement: {} };
+    g.getComputedStyle = () => ({ backgroundColor: "", getPropertyValue: (name: string) => tokens[name] ?? "" });
+  });
+  afterAll(() => {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(g, key, descriptor);
+      else delete g[key];
+    }
+    previous.clear();
+  });
   beforeEach(() => setTokens(LIGHT));
 
   it("reads light tokens and exposes a 12-color light palette", () => {

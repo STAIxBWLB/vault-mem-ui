@@ -133,7 +133,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       if (host.subscribe) stops.push(host.subscribe((reply) => set({ reply, phase: "ready", error: undefined })));
       else {
         // A background tab must not keep a standalone server alive indefinitely.
-        const page = typeof document === "undefined" ? undefined : document;
+        const page = typeof document !== "undefined" && typeof document.addEventListener === "function" && typeof document.removeEventListener === "function" ? document : undefined;
         let hidden = page?.hidden ?? false;
         const timer = setInterval(() => { if (!page?.hidden) void store.refresh(); }, options.intervalMs ?? 5000);
         const visibility = () => {

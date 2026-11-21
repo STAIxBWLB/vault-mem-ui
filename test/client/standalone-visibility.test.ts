@@ -31,3 +31,21 @@ test("hidden standalone pages stop polling and refresh once when visible again",
     await GlobalRegistrator.unregister();
   }
 });
+
+
+test("a document stub without event methods does not break polling", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: {} });
+  const host = createFakeHost();
+  delete host.subscribe;
+  const store = createStore(host, { intervalMs: 20 });
+  const stop = store.start();
+  try {
+    await Bun.sleep(60);
+    expect(host.calls.snapshot.length).toBeGreaterThan(0);
+  } finally {
+    stop();
+    if (previous) Object.defineProperty(globalThis, "document", previous);
+    else delete (globalThis as { document?: unknown }).document;
+  }
+});
