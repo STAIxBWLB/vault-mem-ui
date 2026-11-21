@@ -301,6 +301,10 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
   if (depth >= MAX_INLINE_DEPTH) return text ? [{ kind: "text", text }] : [];
   const out: Inline[] = [];
   const delimiters = delimiterIndex(text);
+  // A `]` that never comes again means no bracket link can start from here on, so a note of unclosed `[` is read once
+  // instead of rescanning the rest of the text at every character (16 KiB of `[` took a few hundred ms).
+  const lastClose = text.lastIndexOf("]");
+  const lastWiki = text.lastIndexOf("]]");
   let buffer = "";
   const flush = () => {
     if (!buffer) return;
@@ -340,7 +344,8 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
       }
     }
     if (char === "!" && text[at + 1] === "[") {
-      const span = wikiSpan(text, at) ?? bracketLink(text, at, true, depth);
+      const span = (lastWiki >= at + 3 ? wikiSpan(text, at) : null) ??
+        (lastClose >= at + 2 ? bracketLink(text, at, true, depth) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -349,7 +354,8 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
       }
     }
     if (char === "[" && links) {
-      const span = (text[at + 1] === "[" ? wikiSpan(text, at) : null) ?? bracketLink(text, at, false, depth);
+      const span = (lastWiki >= at + 2 && text[at + 1] === "[" ? wikiSpan(text, at) : null) ??
+        (lastClose >= at + 1 ? bracketLink(text, at, false, depth) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -577,7 +583,9 @@ function emphasis(text: string, at: number, delimiters: Delimiters, depth: numbe
   if (!first || /\s/.test(first)) return null;
   if (char === "_" && at > 0 && WORD.test(text[at - 1]!)) return null;
   const close = delimiters.closeAt(open, char, width);
-  if (close < 0) return null;
+  // A run that closes on itself (`****`, which can open and close at the same character) holds nothing, and an
+  // emphasis with no content would swallow its own delimiters and render nothing at all.
+  if (close < 0 || close === open) return null;
   const children = inlinePass(text.slice(open, close), depth + 1, links);
   return { node: width === 2 ? { kind: "strong", children } : { kind: "em", children }, end: close + width };
 }
