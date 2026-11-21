@@ -4,11 +4,14 @@
 
 **The tested main-thread fallback is not responsive enough for an interactive graph.** One iteration per animation frame still occupied a median 27.9 ms and p95 34.0 ms, above the 16.7 ms frame budget for 60 Hz, before rendering an interactive Sigma graph. A button click issued by Playwright during layout took 328-769 ms to complete, versus 30-35 ms after layout. Those end-to-end automation timings include Playwright overhead, but the contrast and frame delays support the conclusion for this machine and fixture. The fastest possible scheduling quantum here is already a whole iteration; yielding between iterations cannot interrupt it.
 
-**Re-measured without probe overhead (spike 2b, last section): the numbers above are superseded, the conclusion is not.** A persistent-matrix loop with nothing else in the timed region costs a median 26.6 ms per iteration at 10,000 nodes / 30,000 edges and 24.8 ms at 100,000 edges, so iteration work alone exceeds the 16.7 ms budget at both sizes. Sigma's cheapest repaint path that also updates edge geometry adds 10.1 ms at 30,000 edges and 29.5 ms at 100,000, and a full refresh adds 12.9 ms and 53.3 ms. Matrix reuse is worth 0.7 ms, so the earlier 27.9 ms was inflated by the unused traversal and the position and displacement copies, not by the matrix rebuild. A free-running same-origin worker holds the page at 16-17 ms frames and 1-2 ms clicks, while its layout advances at 6-51 iterations per second, enough for a settling graph and not for 60 position updates per second. At 100,000 edges its batched repaint still costs 19-25 ms on the main thread, and 220-300 ms iteration bursts appear inside most worker runs. An earlier revision of that section measured a repaint path that never updated edge geometry; its rendering figures and its "cheap update" claim are withdrawn.
+**Re-measured without probe overhead (spike 2b, the Re-measurement section below): the numbers above are superseded, the conclusion is not.** A persistent-matrix loop with nothing else in the timed region costs a median 26.6 ms per iteration at 10,000 nodes / 30,000 edges and 24.8 ms at 100,000 edges, so iteration work alone exceeds the 16.7 ms budget at both sizes. Sigma's cheapest repaint path that also updates edge geometry adds 10.1 ms at 30,000 edges and 29.5 ms at 100,000, and a full refresh adds 12.9 ms and 53.3 ms. Matrix reuse is worth 0.7 ms, so the earlier 27.9 ms was inflated by the unused traversal and the position and displacement copies, not by the matrix rebuild. A free-running same-origin worker holds the page at 16-17 ms frames and 1-2 ms clicks, while its layout advances at 6-51 iterations per second, enough for a settling graph and not for 60 position updates per second. At 100,000 edges its batched repaint still costs 19-25 ms on the main thread, and 220-300 ms iteration bursts appear inside most worker runs. An earlier revision of that section measured a repaint path that never updated edge geometry; its rendering figures and its "cheap update" claim are withdrawn.
 
 A same-origin module worker did start from acon's existing `panel.js` endpoint, while a `blob:` worker was blocked. A synthetic worker also ran 100 public API iterations while the page remained responsive, but this is not proof that the stock ForceAtlas2 worker supervisor can use that URL: version 0.10.1 creates its worker from a Blob. The proposed one-module contract and acon's actual available asset routes must be resolved for a supported worker integration. The task requests a draft for agent-console rather than a CSP workaround; that draft is below and has not been filed. No change to acon's CSP is implied by the same-origin result.
 
 ## Method and results
+
+The figures in this section are the original spike-2 run, taken with probe work inside the
+timed region; the Re-measurement section below supersedes them. The method itself is unchanged.
 
 Tested Chrome 157.0.8103.78 headless on macOS, Apple M5 Max, 64 GB RAM, with acon commit `8babe31f421682670a17ee2498f485e6f9ea20a5`, graphology 0.26.0 and graphology-layout-forceatlas2 0.10.1. A synthetic graph has 10,000 nodes, 30,000 undirected edges (offsets 1, 17 and 101), deterministic seeded initial coordinates, no real note data and inferred ForceAtlas2 settings with Barnes-Hut optimization. This is one sparse graph, not the 100,000-edge worst case.
 
@@ -35,7 +38,8 @@ Same machine and fixture family as spike 2: Apple M5 Max, 64 GB, Chrome 159.0.81
 through Playwright 1.65.1, acon at `8babe31` serving a fixture panel from its real server and
 CSP, graphology 0.26.0, graphology-layout-forceatlas2 0.10.1 and Sigma 3.0.3. Synthetic graphs
 use spike 2's seeded generator: 10,000 nodes at pseudo-random initial coordinates, edges from
-fixed index offsets (30,000 edges: offsets 1, 17, 101; 100,000 edges: ten offsets),
+fixed index offsets (30,000 edges: offsets 1, 17, 101; 100,000 edges: offsets 1, 7, 17, 29,
+41, 53, 67, 79, 91, 101),
 `inferSettings` with Barnes-Hut. Nothing here is real note data.
 
 The headless browser used ANGLE over Metal, the machine's GPU. A software-WebGL (SwiftShader)
@@ -57,7 +61,7 @@ read-back and the proxy computed outside it. Frame interval is the gap between t
 consecutive animation frames. A click is a Playwright action on a button, so it includes the
 driver's actionability checks and is a latency proxy, not browser Event Timing INP. Handler lag
 is `performance.now() - event.timeStamp` inside the `pointerdown` listener. Values are medians
-of three runs (two for the sustained arms).
+of three runs (two for the 3 s soak arms).
 
 ### Which Sigma repaint path actually updates edges
 
@@ -115,8 +119,9 @@ What the re-measurement changes in the earlier numbers:
   70,000 edges add. With a renderer this reverses: the repaint is three times as expensive at
   100,000 edges (29.5 against 10.1 ms), so 100,000 edges is the slow case end to end.
 - The edges-correct repaint path is cheaper than a full refresh (10.1 against 12.9 ms at 30,000
-  edges, 29.5 against 53.3 ms at 100,000), and it is the one an animated layout should use. It
-  is still 10-30 ms of main-thread work per frame on top of a 25-27 ms iteration.
+  edges, 29.5 against 53.3 ms at 100,000), and it is the path an animated layout should use,
+  provided its partial graph lists both nodes and edges. It is still 10-30 ms of main-thread
+  work per frame on top of a 25-27 ms iteration.
 - Iteration cost alone is above the 16.7 ms budget at both sizes, with no renderer in the loop,
   and input waits for a whole iteration: clicks land 180-610 ms late and the pointerdown handler
   runs one iteration late (24.5-84.1 ms). The conclusion does not depend on the rendering path,
@@ -133,7 +138,8 @@ writes the newest batch into the node attributes on each animation frame and, wh
 performs the edges-correct Sigma repaint. Layout never blocks the main thread; the repaint does.
 
 Each row is three runs of 400 frames (about 6.7 s), stopped earlier if the movement proxy is
-reached. The sustained rows are two runs of 3 s. Per-run figures are separated by semicolons.
+reached. The two soak rows at the end are two runs of 3 s each. Per-run figures are separated
+by semicolons.
 "Apply" is the main-thread cost of writing a batch and repainting, and "render" is the repaint
 alone.
 
@@ -154,7 +160,7 @@ batch per iteration; the 100 ms arm posts about five iterations per batch and le
 run at 40-50 iterations per second instead of 17-29.
 
 The page stays at 60 Hz in every worker arm and input latency drops to about a millisecond,
-against 24-63 ms of handler lag and 180-610 ms of click action on the main thread. Layout
+against 24.5-84.1 ms of handler lag and 181-610 ms of click action on the main thread. Layout
 throughput is the price: across runs it spans 6-51 iterations per second, with clean runs at
 20-30 under 16 ms batches and 40-51 under 100 ms batches, and a burst-stopped run as low as 5.
 The price of showing the result is
@@ -191,9 +197,13 @@ a settling time.
   so the earlier verdict was right for the wrong reason: the cost is the algorithm iteration
   itself, and no scheduling inside the iteration can cut it below a whole iteration.
 - A same-origin module worker keeps the page at 16-17 ms frames and input at about 1 ms, and its
-  iteration cost matches the main thread's. The stock 0.10.1 supervisor is still not usable
-  because it creates its worker from a `blob:`; the same-origin panel-module worker is the
-  supported path this project can use.
+  iteration cost sits inside the main thread's run-to-run spread: 26.3-28.0 ms p50 against
+  26.6 ms at 30,000 edges, and 24.6-28.0 ms against 24.8 ms at 100,000. The stock 0.10.1
+  supervisor is still not usable because it creates its worker from a `blob:`. The same-origin
+  panel-module worker is the only worker route that works in the console's local host, and it is
+  not available as things stand in the static multi-node host: there the panel module is served
+  from the node origin with an `acon_resource` grant, so a worker started from that module is
+  cross-origin to the page and loses the grant.
 - Showing worker results at 100,000 edges costs 19-25 ms of main-thread repaint per batch, so the
   panel needs a batch cadence that fits the frame budget: 100 ms batches held frames at 16.7 ms
   p50 (21-25 ms p95) and let the worker run at 40-50 iterations per second, while 16 ms batches
@@ -204,10 +214,20 @@ a settling time.
 
 ### Reproduction (spike 2b)
 
-The harness is in the repository at `spikes/02b/`: `graph.js` (synthetic graph and transfer
-arrays), `panel.js` (page arms and the worker entry, one module selected by
-`typeof document === 'undefined'`), `server.ts` (acon fixture serving the bundle as a plugin
-panel), `measure.ts` (Playwright driver) and `README.md`.
+The harness is in the repository at `spikes/02b/`, so the reproduction is the committed code
+rather than a quotation that can drift from it. Each piece the tables depend on:
+
+| piece | file | entry point |
+|---|---|---|
+| graph construction, seeded coordinates, edge offsets | `spikes/02b/graph.js` | `makeGraph(order, edgeSet, seed)` and `EDGE_SETS` (`sparse` = 1, 17, 101 giving 30,000 edges; `dense` = 1, 7, 17, 29, 41, 53, 67, 79, 91, 101 giving 100,000) |
+| worker transfer arrays | `spikes/02b/graph.js` | `toTransferArrays(graph)`: node order, `Float32Array` x and y, `Uint32Array` edge endpoint pairs |
+| position write-back | `spikes/02b/graph.js` | `writePositions(graph, matrix, stride)` with `stride = matrix.length / graph.order` |
+| main-thread arms and the edge-correctness instrumentation | `spikes/02b/panel.js` | `runMainCase`, `measureEdgeCorrectness`, `refreshSigma(sigma, graph, mode)` |
+| worker branch and protocol | `spikes/02b/panel.js` | the `typeof document === 'undefined'` branch: `init`, `start`, `stop`, `cpu` inbound; `boot`, `ready`, `batch`, `stopped`, `cpu`, `failure` outbound; `iterate` in chunks of three with a `MessageChannel` yield and one transferred batch per interval |
+| worker driver on the page | `spikes/02b/panel.js` | `runWorkerCase`: applies the newest batch in `requestAnimationFrame`, repaints, records apply and render cost |
+| server | `spikes/02b/server.ts` | acon `startServer` with an in-memory plugin that serves `bundle.js` as `/p/spike2b/panel.js` |
+| measurement driver | `spikes/02b/measure.ts` | spawns the server, reads the ticket, loads the page once, routes by hash, clicks `#pulse` every 50 ms, writes `result.json` |
+| pinned dependencies | `spikes/02b/package.json`, `spikes/02b/bun.lock` | `bun install` |
 
 ```sh
 cd spikes/02b
@@ -252,6 +272,11 @@ described above.
 A graph panel needs to run ForceAtlas2 at 10,000 nodes without blocking the UI. Re-measured on 2026-11-21 (Chrome 159, ANGLE/Metal), one layout iteration in a persistent-matrix loop costs a median 26.6 ms at 30,000 edges and 24.8 ms at 100,000 edges on the main thread, before any rendering, and Sigma's cheapest repaint that also moves the edges adds another 10.1-29.5 ms. That is above the 16.7 ms frame budget, so the work has to leave the main thread. The library's own worker supervisor cannot help, because it creates its worker from a `blob:` that the console CSP blocks.
 
 A module worker started from the panel's own same-origin URL does work in the console. A synthetic run kept the page at 16-17 ms frames and about 1 ms click actions while the layout ran, and positions came back as two transferred `Float32Array`s (80,000 bytes per update at 10,000 nodes), with the layout advancing at 6-51 iterations per second. Showing those positions still costs the main thread 19-25 ms per repaint at 100,000 edges, so the panel will batch updates rather than repaint every frame. The console contract does not describe that route or its lifecycle.
+
+In the static multi-node host the same-origin property does not hold today: the panel module is
+served from the node origin with an `acon_resource` grant, so a worker started from that module
+is cross-origin to the page and loses the grant. The contract should say what a panel may do
+there, or state that the worker route is local-host only.
 
 Please make the same-origin panel-module worker a supported contract. Document that a panel may start a module worker from its own asset URL, and define and test the rest of it: authentication in local and static multi-node hosts, MIME type, CSP, cache and version pinning, teardown and failure behaviour. Keeping the CSP restrictive and stating that `blob:` workers stay blocked are both fine for this request. The UI project will adapt its layout worker to the documented contract and test cancellation, throughput and data transfer.
 
