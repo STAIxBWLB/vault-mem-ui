@@ -15,6 +15,8 @@ export interface LayoutEngine {
   readonly iterations: number;
   /** Runs `n` ForceAtlas2 iterations. */
   step(n?: number): void;
+  /** Spike 2's movement proxy for the last iteration: sqrt(sum |dp|^2 / sum |p|^2); 0 before the first step. */
+  readonly movement: number;
   /** Current coordinates as a fresh x0,y0,x1,y1,... array (safe to transfer). */
   positions(): Float32Array;
 }
@@ -60,12 +62,26 @@ export function createLayoutEngine(graph: LayoutGraph, settings: ForceAtlas2Sett
   }
   const merged = { ...DEFAULTS, ...settings };
   let iterations = 0;
+  let movement = 0;
+  const prev = new Float32Array(n * 2);
   return {
     nodeCount: n,
     get iterations() { return iterations; },
+    get movement() { return movement; },
     step(count = 1) {
       if (n === 0) return;
-      for (let k = 0; k < count; k += 1) iterate(merged, nodes, edges);
+      for (let k = 0; k < count; k += 1) {
+        for (let i = 0; i < n; i += 1) { prev[i * 2] = nodes[i * PPN]!; prev[i * 2 + 1] = nodes[i * PPN + 1]!; }
+        iterate(merged, nodes, edges);
+        let moved = 0, extent = 0;
+        for (let i = 0; i < n; i += 1) {
+          const x = nodes[i * PPN]!, y = nodes[i * PPN + 1]!;
+          const dx = x - prev[i * 2]!, dy = y - prev[i * 2 + 1]!;
+          moved += dx * dx + dy * dy;
+          extent += x * x + y * y;
+        }
+        movement = extent > 0 ? Math.sqrt(moved / extent) : (moved > 0 ? Infinity : 0);
+      }
       iterations += count;
     },
     positions() {

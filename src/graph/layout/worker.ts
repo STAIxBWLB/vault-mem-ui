@@ -3,7 +3,7 @@
 // name: LAYOUT_WORKER_NAME})`. No blob: URL, no separate asset.
 
 import { createLayoutEngine, type LayoutEngine } from "./engine";
-import { LAYOUT_WORKER_NAME, type FromWorker, type ToWorker } from "./protocol";
+import { CONVERGED_MOVEMENT, CONVERGED_STREAK, LAYOUT_WORKER_NAME, MAX_LAYOUT_ITERATIONS, type FromWorker, type ToWorker } from "./protocol";
 
 interface WorkerScope {
   name?: string;
@@ -30,7 +30,10 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
   const now = options.now ?? (() => performance.now());
   let engine: LayoutEngine | null = null;
   let batchMs = 16;
-  let maxIterations = Infinity;
+  let maxIterations = MAX_LAYOUT_ITERATIONS;
+  let convergedMovement = CONVERGED_MOVEMENT;
+  let convergedStreak = CONVERGED_STREAK;
+  let streak = 0;
   let state: "idle" | "running" | "paused" | "stopped" | "done" = "idle";
   let pending = false;
 
@@ -52,11 +55,14 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
     if (state !== "running" || !engine) return;
     try {
       const start = now();
+      let settled = false;
       do {
         engine.step(1);
-      } while (engine.iterations < maxIterations && now() - start < batchMs);
+        streak = engine.movement < convergedMovement ? streak + 1 : 0;
+        settled = streak >= convergedStreak || engine.nodeCount === 0;
+      } while (!settled && engine.iterations < maxIterations && now() - start < batchMs);
       sendPositions();
-      if (engine.iterations >= maxIterations) {
+      if (settled || engine.iterations >= maxIterations) {
         state = "done";
         post({ type: "state", state: "done" });
         return;
@@ -81,7 +87,10 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
         case "init":
           engine = createLayoutEngine(message.graph, message.settings);
           batchMs = message.batchMs;
-          maxIterations = message.maxIterations ?? Infinity;
+          maxIterations = message.maxIterations ?? MAX_LAYOUT_ITERATIONS;
+          convergedMovement = message.convergedMovement ?? CONVERGED_MOVEMENT;
+          convergedStreak = message.convergedStreak ?? CONVERGED_STREAK;
+          streak = 0;
           post({ type: "ready" });
           run();
           break;

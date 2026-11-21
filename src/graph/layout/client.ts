@@ -43,7 +43,11 @@ export interface StartLayoutOptions extends LayoutCallbacks {
   graph: LayoutGraph;
   settings?: ForceAtlas2Settings;
   batchMs?: number;
+  /** Overrides MAX_LAYOUT_ITERATIONS (the safety cap). */
   maxIterations?: number;
+  /** Override CONVERGED_MOVEMENT / CONVERGED_STREAK (the default end condition). */
+  convergedMovement?: number;
+  convergedStreak?: number;
   /** False on hosts that cannot start a worker (the static multi-node host). */
   workerAllowed?: boolean;
   /** Worker constructor; defaults to the global Worker. */
@@ -123,6 +127,8 @@ export function startLayout(options: StartLayoutOptions): Promise<LayoutHandle |
       settings: options.settings ?? inferLayoutSettings(graph.nodeCount),
       batchMs: options.batchMs ?? batchIntervalMs(graph.sources.length),
       ...(options.maxIterations !== undefined ? { maxIterations: options.maxIterations } : {}),
+      ...(options.convergedMovement !== undefined ? { convergedMovement: options.convergedMovement } : {}),
+      ...(options.convergedStreak !== undefined ? { convergedStreak: options.convergedStreak } : {}),
     };
     // Copy, not transfer: the caller keeps its arrays (they may be the cached layout on screen).
     send(init);

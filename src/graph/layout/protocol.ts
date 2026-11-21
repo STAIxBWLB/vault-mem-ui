@@ -18,6 +18,14 @@ export function batchIntervalMs(edgeCount: number): number {
   return edgeCount > LARGE_GRAPH_EDGES ? LARGE_BATCH_MS : SMALL_BATCH_MS;
 }
 
+/** Default end condition. The layout stops as `done` when the movement proxy from spike 2,
+ *  sqrt(sum of squared node displacements / sum of squared coordinates), stays below CONVERGED_MOVEMENT for
+ *  CONVERGED_STREAK consecutive iterations. This is a heuristic, not a visual-quality guarantee. */
+export const CONVERGED_MOVEMENT = 0.01;
+export const CONVERGED_STREAK = 5;
+/** Safety cap: the layout ends as `done` after this many iterations even if it has not settled. */
+export const MAX_LAYOUT_ITERATIONS = 2_000;
+
 /** ForceAtlas2's own inferSettings formula (graphology-layout-forceatlas2 0.10.1 index.js, MIT), taking only the
  *  node count so the main thread does not need a graphology instance. */
 export function inferLayoutSettings(nodeCount: number): ForceAtlas2Settings {
@@ -43,7 +51,7 @@ export interface LayoutGraph {
 }
 
 export type ToWorker =
-  | { type: "init"; graph: LayoutGraph; settings: ForceAtlas2Settings; batchMs: number; maxIterations?: number }
+  | { type: "init"; graph: LayoutGraph; settings: ForceAtlas2Settings; batchMs: number; maxIterations?: number; convergedMovement?: number; convergedStreak?: number }
   | { type: "pause" }
   | { type: "resume" }
   | { type: "stop" }

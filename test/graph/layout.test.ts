@@ -1,8 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import {
+  CONVERGED_MOVEMENT,
+  CONVERGED_STREAK,
   LARGE_BATCH_MS,
   LARGE_GRAPH_EDGES,
   LAYOUT_WORKER_NAME,
+  MAX_LAYOUT_ITERATIONS,
   SMALL_BATCH_MS,
   batchIntervalMs,
   inferLayoutSettings,
@@ -27,6 +30,9 @@ const allFinite = (a: Float32Array) => a.every(Number.isFinite);
 
 describe("constants", () => {
   it("applies batches less often above the large-graph threshold", () => {
+    expect(CONVERGED_MOVEMENT).toBe(0.01);
+    expect(CONVERGED_STREAK).toBe(5);
+    expect(Number.isFinite(MAX_LAYOUT_ITERATIONS)).toBe(true);
     expect(batchIntervalMs(LARGE_GRAPH_EDGES)).toBe(SMALL_BATCH_MS);
     expect(batchIntervalMs(LARGE_GRAPH_EDGES + 1)).toBe(LARGE_BATCH_MS);
     expect(LARGE_BATCH_MS).toBe(100);
@@ -120,9 +126,39 @@ describe("worker protocol (in process)", () => {
     expect(w.out.length).toBe(afterStop);
   });
 
+  it("ends on its own as done when the layout settles, without maxIterations", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: ring(20), settings: inferLayoutSettings(20), batchMs: 50 });
+    let guard = 0;
+    while (w.pending() && guard++ < 10_000) w.runOne();
+    expect(w.pending()).toBe(0);
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+    const last = w.out.filter((m) => m.type === "positions").at(-1);
+    if (!last || last.type !== "positions") throw new Error("no positions");
+    expect(last.iterations).toBeGreaterThan(CONVERGED_STREAK);
+    expect(last.iterations).toBeLessThan(MAX_LAYOUT_ITERATIONS);
+  });
+
+  it("stops at the safety cap when the layout never settles", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: ring(10), settings: {}, batchMs: 1000, convergedMovement: -1 });
+    while (w.pending()) w.runOne();
+    const last = w.out.filter((m) => m.type === "positions").at(-1);
+    expect(last && last.type === "positions" && last.iterations).toBe(MAX_LAYOUT_ITERATIONS);
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+  });
+
+  it("ends an empty graph immediately", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: { nodeCount: 0, positions: new Float32Array(0), sources: new Uint32Array(0), targets: new Uint32Array(0) }, settings: {}, batchMs: 5 });
+    w.runOne();
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+    expect(w.pending()).toBe(0);
+  });
+
   it("reports done after maxIterations", () => {
     const w = fakeScope();
-    w.send({ type: "init", graph: ring(10), settings: {}, batchMs: 1000, maxIterations: 7 });
+    w.send({ type: "init", graph: ring(10), settings: {}, batchMs: 1000, maxIterations: 7, convergedMovement: 0 });
     while (w.pending()) w.runOne();
     const last = w.out.filter((m) => m.type === "positions").at(-1);
     expect(last && last.type === "positions" && last.iterations).toBe(7);
@@ -160,7 +196,7 @@ describe("startLayout with a real module worker", () => {
     let stopped!: () => void;
     const stoppedP = new Promise<void>((r) => { stopped = r; });
     const handle = await startLayout({
-      moduleUrl: ENTRY, graph: ring(40), batchMs: 5,
+      moduleUrl: ENTRY, graph: ring(40), batchMs: 5, convergedMovement: -1, maxIterations: 1e9,
       onPositions: (p) => batches.push(p),
       onState: (s) => { states.push(s); if (s === "stopped") stopped(); },
     });
@@ -187,7 +223,7 @@ describe("startLayout with a real module worker", () => {
 
   it("teardown terminates the worker and no more batches arrive", async () => {
     const batches: Float32Array[] = [];
-    const h = (await startLayout({ moduleUrl: ENTRY, graph: ring(40), batchMs: 2, onPositions: (p) => batches.push(p) })) as LayoutHandle;
+    const h = (await startLayout({ moduleUrl: ENTRY, graph: ring(40), batchMs: 2, convergedMovement: -1, maxIterations: 1e9, onPositions: (p) => batches.push(p) })) as LayoutHandle;
     while (batches.length < 1) await Bun.sleep(5);
     h.teardown();
     const n = batches.length;
