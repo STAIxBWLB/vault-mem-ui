@@ -1,3 +1,2 @@
-.agenthub/config.json
-.agenthub/routing.toml
-.agenthub/sdlc.toml
+.agenthub/
+.jcode/
