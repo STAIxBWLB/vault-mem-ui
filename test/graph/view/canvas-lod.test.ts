@@ -15,7 +15,7 @@ function harness(input: GraphInput) {
   const graph: GraphLike = {
     addNode: () => undefined,
     addEdgeWithKey: (k, _s, _t, a) => { edges.push([k, a]); },
-    setNodeAttribute: () => undefined, getNodeAttribute: () => undefined, setEdgeAttribute: () => undefined, hasNode: () => true,
+    setNodeAttribute: () => undefined, getNodeAttribute: () => undefined, setEdgeAttribute: () => undefined, hasNode: () => true, updateEachNodeAttributes: () => undefined,
   };
   const sigma: SigmaLike = {
     on: () => undefined,

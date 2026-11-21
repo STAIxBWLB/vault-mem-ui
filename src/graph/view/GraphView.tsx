@@ -5,7 +5,7 @@
  * provider's graph snapshot this panel states that the graph is not available instead of guessing a wire format.
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Empty, Notice } from "../../client/components.tsx";
 import { vaultParam, type ViewProps } from "../../client/views/common.ts";
 import { startLayout, type LayoutHandle } from "../layout/client";
@@ -72,10 +72,12 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
   // Every poll or push hands over a new reply object; only a changed graph may rebuild the view (and its worker).
   // Content is compared exactly (no hash, so no collisions); the generation counter is the React key.
   const parsed = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
-  const last = useRef<{ content: string | null; generation: number }>({ content: null, generation: 0 });
+  // Derived state (React's "store information from previous renders" pattern): a changed content bumps the
+  // generation during render; no ref is written while rendering.
+  const [seen, setSeen] = useState<{ content: string | null; generation: number }>({ content: null, generation: 0 });
   const content = parsed ? graphContent(parsed) : null;
-  if (content !== last.current.content) last.current = { content, generation: last.current.generation + 1 };
-  const generation = last.current.generation;
+  if (content !== seen.content) setSeen({ content, generation: seen.generation + 1 });
+  const generation = content !== seen.content ? seen.generation + 1 : seen.generation;
   const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [generation]); // keyed on content, not identity
   if (!model) {
     const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
@@ -87,7 +89,9 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
 
 function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
-  const state = useSyncExternalStore((l) => store.subscribe(l), () => store.getState(), () => store.getState());
+  const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
+  const state = useSyncExternalStore(subscribe, store.getState, store.getState);
+  const selectedTextId = useId();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const layoutRef = useRef<LayoutHandle | null>(null);
@@ -186,6 +190,8 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
   const paused = state.layout.kind === "paused";
 
   const onKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    // Leave browser and host shortcuts (Ctrl/Cmd+P, Ctrl+L, Alt+arrows) alone.
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     const key = event.key;
     if (key === "ArrowRight" || key === "ArrowDown") store.step(1);
     else if (key === "ArrowLeft" || key === "ArrowUp") store.step(-1);
@@ -226,7 +232,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         tabIndex={0}
         role="application"
         aria-label="Graph canvas. Arrow keys move between linked notes, Enter opens, L opens the local view, P picks path endpoints, Escape clears."
-        aria-describedby="vmem-graph-selected"
+        aria-describedby={selectedTextId}
         onKeyDown={onKey}
       />
       <aside className="vmem-graph-sidebar" aria-label="Graph details">
@@ -235,7 +241,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />
         <GraphInsightsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} select={(id) => store.select(id)} />
       </aside>
-      <p id="vmem-graph-selected" className="vmem-sub" aria-live="polite">
+      <p id={selectedTextId} className="vmem-sub" aria-live="polite">
         {selected ? `${selected.label}${selected.relPath ? "" : " (unresolved link)"} · ${selected.degree} links${state.path ? ` · path of ${state.path.length - 1} steps` : ""}` : "No note selected"}
       </p>
     </section>

@@ -21,7 +21,7 @@ export interface SigmaLike {
   getCamera(): { getState(): { ratio: number }; on(event: "updated", handler: (s: { ratio: number }) => void): unknown; animate(state: Partial<{ x: number; y: number; ratio: number }>, opts?: { duration?: number }): unknown };
   getNodeDisplayData(node: string): { x: number; y: number } | undefined;
   setSetting(key: string, value: unknown): unknown;
-  refresh(): unknown;
+  refresh(opts?: { partialGraph?: { nodes?: string[]; edges?: string[] }; skipIndexation?: boolean; schedule?: boolean }): unknown;
   kill(): void;
 }
 export interface GraphLike {
@@ -31,6 +31,8 @@ export interface GraphLike {
   hasNode(id: string): boolean;
   setEdgeAttribute(key: string, name: string, value: unknown): unknown;
   getNodeAttribute(id: string, name: string): unknown;
+  /** One pass over every node; graphology emits a single eachNodeAttributesUpdated that Sigma handles itself. */
+  updateEachNodeAttributes(updater: (node: string, attrs: Record<string, unknown>) => Record<string, unknown>, hints?: { attributes?: string[] }): void;
 }
 export interface CanvasDeps {
   createGraph(): GraphLike;
@@ -106,6 +108,7 @@ export function mountGraphCanvas(
   });
 
   const nodeById = new Map(model.nodes.map((n) => [n.id, n]));
+  const nodeIndex = new Map(model.nodes.map((n, i) => [n.id, i]));
   let state = initial;
   let pathNodes = new Set<string>(state.path ?? []);
   let pathEdges = pathEdgeKeys(state.path);
@@ -173,9 +176,21 @@ export function mountGraphCanvas(
   sigma.getCamera().on("updated", (s) => callbacks.onCamera(s.ratio));
 
   let lastLod = state.lod;
+  // Reducer-only repaint: re-run reducers and reprocess the programs for every node and edge without re-indexing
+  // (Sigma's skipIndexation needs an explicit partialGraph; a bare refresh() always re-indexes everything).
+  const everything = { nodes: model.nodes.map((n) => n.id), edges: model.edges.map((_, i) => `e${i}`) };
+  const repaint = () => sigma.refresh({ partialGraph: everything, skipIndexation: true, schedule: true });
   return {
     update(next) {
+      const prev = state;
       state = next;
+      const lodChanged = next.lod !== lastLod;
+      const reducersChanged = prev.selectedId !== next.selectedId || prev.hoverId !== next.hoverId || prev.focusId !== next.focusId
+        || prev.path !== next.path || prev.pathSourceId !== next.pathSourceId || prev.pinned !== next.pinned
+        || prev.colorByCommunity !== next.colorByCommunity;
+      const visibilityChanged = prev.derived !== next.derived;
+      // A camera move, a layout iteration count or a pause only changes what the reducers read when LOD flips.
+      if (!lodChanged && !reducersChanged && !visibilityChanged) return;
       pathNodes = new Set(next.path ?? []);
       pathEdges = pathEdgeKeys(next.path);
       neighbours = new Set();
@@ -183,22 +198,25 @@ export function mountGraphCanvas(
         if (edge.source === next.hoverId) neighbours.add(edge.target);
         if (edge.target === next.hoverId) neighbours.add(edge.source);
       }
-      if (next.lod !== lastLod) {
+      if (lodChanged) {
         if (next.lod.labelDensity !== lastLod.labelDensity) sigma.setSetting("labelDensity", next.lod.labelDensity);
         if (next.lod.renderLabels !== lastLod.renderLabels) sigma.setSetting("renderLabels", next.lod.renderLabels);
         lastLod = next.lod;
       }
-      sigma.refresh();
+      // Hiding or showing nodes (local view) changes the label grid, which only a full refresh rebuilds.
+      if (visibilityChanged) sigma.refresh();
+      else repaint();
     },
     applyPositions(positions) {
       if (positions.length !== model.nodes.length * 2) return;
-      model.nodes.forEach((node, i) => {
+      const index = nodeIndex;
+      graph.updateEachNodeAttributes((node, attrs) => {
+        const i = index.get(node);
+        if (i === undefined) return attrs;
         const x = positions[i * 2]!, y = positions[i * 2 + 1]!;
-        if (isUsableCoordinate(x) && isUsableCoordinate(y)) {
-          graph.setNodeAttribute(node.id, "x", x);
-          graph.setNodeAttribute(node.id, "y", y);
-        }
-      });
+        if (isUsableCoordinate(x) && isUsableCoordinate(y)) { attrs.x = x; attrs.y = y; }
+        return attrs;
+      }, { attributes: ["x", "y"] });
     },
     focusNode(id) {
       const d = sigma.getNodeDisplayData(id);

@@ -46,6 +46,7 @@ function fakeCanvas(): Fake {
     addEdgeWithKey: () => undefined,
     setNodeAttribute: (id, k, v) => { fake.attrs.get(id)![k] = v; },
     getNodeAttribute: (id, k) => fake.attrs.get(id)?.[k],
+    updateEachNodeAttributes: (fn) => { for (const [id, a] of fake.attrs) fake.attrs.set(id, fn(id, a)); },
     setEdgeAttribute: (key, k, v) => { fake.edgeColors.set(key, v as string); void k; },
     hasNode: (id) => fake.attrs.has(id),
   };
@@ -340,6 +341,26 @@ describe("GraphPanel", () => {
     const refreshes = fake.refreshes;
     await act(async () => fake.handlers.get("enterNode")!({ node: "c" }));
     expect(fake.refreshes).toBeGreaterThan(refreshes);
+  });
+
+  test("Ctrl/Cmd/Alt chords reach the browser; only bare keys drive the graph", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    const canvas = container.querySelector(".vmem-graph-canvas") as HTMLElement;
+    for (const init of [{ key: "p", ctrlKey: true }, { key: "p", metaKey: true }, { key: "l", ctrlKey: true }, { key: "ArrowRight", altKey: true }]) {
+      const event = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+      await act(async () => { canvas.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(container.textContent).not.toContain("Global view");
+    expect(container.textContent).toContain("Alpha");
+    const bare = new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true });
+    await act(async () => { canvas.dispatchEvent(bare); });
+    expect(bare.defaultPrevented).toBe(true);
+    expect(container.textContent).toContain("Global view");
   });
 
   test("toolbar opens the local view and back", async () => {
