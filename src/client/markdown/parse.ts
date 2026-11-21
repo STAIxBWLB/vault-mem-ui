@@ -15,7 +15,7 @@ export type Inline =
   | { kind: "em"; children: Inline[] }
   | { kind: "link"; href: string; children: Inline[] }
   | { kind: "image"; alt: string; src: string }
-  | { kind: "wiki"; target: string; heading: string; label: string; embed: boolean }
+  | { kind: "wiki"; target: string; heading: string; block: string; label: string; embed: boolean }
   | { kind: "break" };
 
 export interface ListItem {
@@ -389,8 +389,12 @@ function wikiSpan(text: string, at: number): Span | null {
   if (!address) return null;
   const hash = address.indexOf("#");
   const target = (hash < 0 ? address : address.slice(0, hash)).trim();
-  const heading = hash < 0 ? "" : address.slice(hash + 1).trim();
-  return { node: { kind: "wiki", target, heading, label: alias || address, embed }, end: close + 2 };
+  const anchor = hash < 0 ? "" : address.slice(hash + 1).trim();
+  // vmem splits the anchor into a heading and a `^block` reference, and resolves each link by both, so the tree keeps
+  // them apart: two links to one note with different anchors can resolve differently.
+  const block = anchor.startsWith("^") ? anchor.slice(1) : "";
+  const heading = anchor && !anchor.startsWith("^") ? anchor : "";
+  return { node: { kind: "wiki", target, heading, block, label: alias || address, embed }, end: close + 2 };
 }
 
 function bracketLink(text: string, at: number, image: boolean): Span | null {

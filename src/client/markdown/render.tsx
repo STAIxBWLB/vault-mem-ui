@@ -6,13 +6,23 @@ import { parseMarkdown, safeHref, type Block, type Inline } from "./parse.ts";
 
 type OpenNote = (path: string) => void;
 
-/** What the provider itself resolved each wiki-link target to: a note path, or `null` when it could not. */
+/** What the provider resolved one written link to: a note path, or `null` when it could not resolve that link. */
 export type WikiIndex = Map<string, string | null>;
 
 /**
- * Read the note panel's own `links` answer (`out` resolved, `dead` not) into a target-to-path map, so a wiki-link in
- * the body shows the resolution vmem computed instead of one this module guesses. A target the answer does not list
- * is treated as unresolved.
+ * The identity the provider resolves: the target and the anchor written with it. `[[Alpha]]` and `[[Alpha#gone]]` are
+ * two links to one note and vmem can resolve the first while it refuses the second, so the target alone is not the key.
+ * A target cannot contain a newline (vmem's own link scan excludes it), which makes it a safe separator.
+ */
+export function wikiKey(target: string, heading: string, block: string): string {
+  return `${target}\n${heading}\n${block}`;
+}
+
+/**
+ * Read the note panel's own `links` answer (`out` resolved, `dead` not) into a map keyed by link rather than by note,
+ * so each wiki-link in the body shows the resolution vmem computed for that link instead of a guess made here. A link
+ * this answer does not list is absent from the map, because `vmem_links` is capped (50 by default): absence means the
+ * answer never read that link, not that the provider could not resolve it.
  */
 export function wikiIndex(links: unknown): WikiIndex {
   const box = rec(links);
@@ -20,7 +30,8 @@ export function wikiIndex(links: unknown): WikiIndex {
   for (const row of [...list<unknown>(box.out), ...list<unknown>(box.dead)]) {
     const link = rec(row);
     const target = str(link.target);
-    if (target) index.set(target, str(link.resolved) || null);
+    if (!target) continue;
+    index.set(wikiKey(target, str(link.heading), str(link.block)), str(link.resolved) || null);
   }
   return index;
 }
@@ -165,9 +176,21 @@ function imageTarget(src: string): ReactNode {
 
 function Wiki(props: { node: Extract<Inline, { kind: "wiki" }>; wiki: WikiIndex; onOpenNote?: OpenNote }) {
   const node = props.node;
-  const path = props.wiki.get(node.target) ?? null;
+  const resolved = props.wiki.get(wikiKey(node.target, node.heading, node.block));
   const kind = node.embed ? " vmem-md-wiki-embed" : "";
-  if (!path) {
+  // Absent from the answer is its own state: the link list is capped, so the panel says it cannot place the link rather
+  // than calling a link broken that the provider never answered for.
+  if (resolved === undefined) {
+    return (
+      <span
+        className={`vmem-md-wiki${kind} vmem-md-wiki-unknown`}
+        title={`${node.target}: this note's link list does not include it, so the panel cannot place it`}
+      >
+        {node.label}
+      </span>
+    );
+  }
+  if (resolved === null) {
     return (
       <span className={`vmem-md-wiki${kind} vmem-md-wiki-missing`} title={`${node.target}: vmem could not resolve this link`}>
         {node.label}
@@ -177,7 +200,7 @@ function Wiki(props: { node: Extract<Inline, { kind: "wiki" }>; wiki: WikiIndex;
   if (!props.onOpenNote) return <span className={`vmem-md-wiki${kind}`}>{node.label}</span>;
   const open = props.onOpenNote;
   return (
-    <button type="button" className={`vmem-md-wiki${kind}`} onClick={() => open(path)}>
+    <button type="button" className={`vmem-md-wiki${kind}`} onClick={() => open(resolved)}>
       {node.label}
     </button>
   );

@@ -510,6 +510,13 @@
   cursor: help;
 }
 
+/* A link the capped link list never answered for: neither offered nor called broken. */
+.vmem-md-wiki-unknown {
+  color: var(--vmem-text-2);
+  text-decoration: underline dotted;
+  cursor: help;
+}
+
 .vmem-md-image,
 .vmem-md-image-alt,
 .vmem-md-image-src {
