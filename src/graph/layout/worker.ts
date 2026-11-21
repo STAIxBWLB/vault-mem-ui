@@ -31,6 +31,8 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
   let engine: LayoutEngine | null = null;
   let batchMs = 16;
   let maxIterations = MAX_LAYOUT_ITERATIONS;
+  /** Iteration count at which the current run ends: init grants maxIterations, and so does each restart by "fix". */
+  let limit = MAX_LAYOUT_ITERATIONS;
   let convergedMovement = CONVERGED_MOVEMENT;
   let convergedStreak = CONVERGED_STREAK;
   let streak = 0;
@@ -60,9 +62,9 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
         engine.step(1);
         streak = engine.movement < convergedMovement ? streak + 1 : 0;
         settled = streak >= convergedStreak || engine.nodeCount === 0;
-      } while (!settled && engine.iterations < maxIterations && now() - start < batchMs);
+      } while (!settled && engine.iterations < limit && now() - start < batchMs);
       sendPositions();
-      if (settled || engine.iterations >= maxIterations) {
+      if (settled || engine.iterations >= limit) {
         state = "done";
         post({ type: "state", state: "done" });
         return;
@@ -88,6 +90,7 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
           engine = createLayoutEngine(message.graph, message.settings);
           batchMs = message.batchMs;
           maxIterations = message.maxIterations ?? MAX_LAYOUT_ITERATIONS;
+          limit = maxIterations;
           convergedMovement = message.convergedMovement ?? CONVERGED_MOVEMENT;
           convergedStreak = message.convergedStreak ?? CONVERGED_STREAK;
           streak = 0;
@@ -99,6 +102,14 @@ export function attachLayoutWorker(scope: WorkerScope, options: LayoutLoopOption
           break;
         case "resume":
           if (state === "paused") run();
+          break;
+        case "fix":
+          if (!engine || state === "stopped") break;
+          for (const node of message.nodes) engine.setFixed(node.index, node.fixed, node.position);
+          streak = 0;
+          // A settled or capped layout runs again with a fresh budget so released nodes move; a paused one stays
+          // paused until resumed (and keeps its budget).
+          if (state === "done") { limit = engine.iterations + maxIterations; run(); }
           break;
         case "stop":
           if (engine && state !== "stopped") { state = "stopped"; sendPositions(); post({ type: "state", state: "stopped" }); }

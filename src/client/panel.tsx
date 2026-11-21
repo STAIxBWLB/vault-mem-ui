@@ -4,10 +4,17 @@
  */
 
 import { createRoot } from "react-dom/client";
+import { isLayoutWorkerContext, runLayoutWorker } from "../graph/layout/worker";
+import { configureGraph } from "../graph/view/GraphView.tsx";
 import { createAconHost } from "./acon.ts";
 import { createStandaloneHost } from "./standalone.ts";
 import { App, createClient } from "./App.tsx";
 import type { Host } from "./host.ts";
+
+// This module is also the layout worker: started as `new Worker(new URL(import.meta.url), {type: "module"})` under
+// LAYOUT_WORKER_NAME it runs ForceAtlas2 and nothing else. Module evaluation must stay DOM- and WebGL-free.
+if (isLayoutWorkerContext()) runLayoutWorker();
+else configureGraph({ moduleUrl: new URL(import.meta.url) });
 
 export type { ActionResult, ActionInput, Host, SnapshotReply, Theme } from "./host.ts";
 export { createClient } from "./App.tsx";

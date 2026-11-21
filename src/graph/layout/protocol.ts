@@ -53,6 +53,8 @@ export interface LayoutGraph {
 export type ToWorker =
   | { type: "init"; graph: LayoutGraph; settings: ForceAtlas2Settings; batchMs: number; maxIterations?: number; convergedMovement?: number; convergedStreak?: number }
   | { type: "pause" }
+  /** Pins (fixed) or releases nodes in the running layout; a pinned node keeps `position` when given. Restarts a settled layout. */
+  | { type: "fix"; nodes: { index: number; fixed: boolean; position?: [number, number] }[] }
   | { type: "resume" }
   | { type: "stop" }
   | { type: "teardown" };
