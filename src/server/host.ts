@@ -81,7 +81,7 @@ const secret = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toS
 const INDEX_HTML = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vault</title><link rel="stylesheet" href="/panel.css"></head>
-<body><main id="vmem-ui-root"><p class="vmem-ui-placeholder">vault-mem-ui standalone host is running. The client UI is not built into this bundle yet.</p></main>
+<body><main id="vmem-ui-root"></main>
 <script type="module" src="/panel.js"></script></body></html>
 `;
 

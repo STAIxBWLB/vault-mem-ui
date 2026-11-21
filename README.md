@@ -4,16 +4,16 @@ Web UI for [vmem](https://github.com/STAIxBWLB/vault-mem): a standalone browser 
 
 ## Status
 
-Not published yet. The repository contains the package scaffold, checks, standalone host command, client panels and `acon` console plugin. The standalone client integration is still to come; the design is tracked in this repository's issues.
+Not published yet. The repository contains the package scaffold, checks, standalone host command, client panels and `acon` console plugin. The design is tracked in this repository's issues.
 
 For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run check`.
 
 ## Client
 
-`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint and log. It is written against one small host interface. The same bundle is intended for both hosts; standalone integration is still pending.
+`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint and log. It is written against one small host interface and runs in both hosts from the same bundle.
 
-- Host interface (`src/client/host.ts`): `snapshot`, `action`, `theme` and `mount`. `acon`'s `ConsoleHost` is adapted by `createAconHost`; a standalone adapter for the host HTTP endpoints is still pending, and `createFakeHost` stands in for tests.
-- Writes go through `action` only. In `acon` the console owns the confirmation: its server mints the confirm token, shows the preview in its own dialog and refuses a page that sets `confirmed` or `fingerprint`, so the panel sends the bare action and reports the outcome — the adapter says `confirm: "host"` and drops those two keys instead of forwarding them. A host that answers the provider directly instead (the fake host today, the standalone adapter once integrated) gets the two-step flow from the client: the preview with its fingerprint and the planned changes, nothing sent until the person confirms, and the confirm re-sending that same fingerprint, so the client cannot confirm a preview it did not show.
+- Host interface (`src/client/host.ts`): `snapshot`, `action`, `theme` and `mount`. `acon`'s `ConsoleHost` is adapted by `createAconHost`; the standalone adapter uses the same-origin HTTP endpoints, and `createFakeHost` is available for tests.
+- Writes go through `action` only. In `acon` the console owns the confirmation: its server mints the confirm token, shows the preview in its own dialog and refuses a page that sets `confirmed` or `fingerprint`, so the panel sends the bare action and reports the outcome — the adapter says `confirm: "host"` and drops those two keys instead of forwarding them. A host that answers the provider directly instead (the fake host today, the standalone adapter) gets the two-step flow from the client: the preview with its fingerprint and the planned changes, nothing sent until the person confirms, and the confirm re-sending that same fingerprint, so the client cannot confirm a preview it did not show.
 - A panel or parameter change drops the previous reply and any open preview, so a note you left cannot be read or acted on under the vault or panel you opened next. A preview or confirmation that was still in flight when the person navigated or cancelled is dropped the same way instead of landing on the new panel. The panel says it is loading, and a snapshot that fails says so with the next step.
 - Per-viewer preferences (theme and last panel) live in `localStorage` behind a guarded wrapper: when storage is unavailable or full the panel still works, and the preference applies to the session only.
 - Keyboard: arrow keys, Home and End move through a list, Enter or Space opens the row, `/` focuses search and `Escape` closes the write dialog. The dialog takes the focus when it opens, keeps Tab inside it and hands the focus back to the control that opened it. Reduced motion follows `prefers-reduced-motion`, and the toolbar switch turns it on manually.
@@ -39,7 +39,8 @@ The vault it serves is the one vmem resolves for this process, not `$AGENTHUB_HO
 - API: `POST /api/snapshot` and `POST /api/action` relay to the provider. A snapshot names one of the manifest's panels, plus `inbox` and `search` when the plugin advertises those capabilities; `after` is how many items the page already has, as a whole number 0 or more.
 - Confirmation in standalone mode belongs to the page: the server relays `confirmed` and `fingerprint` exactly as the page sent them, and never adds either. It cannot tell what the browser displayed, so a caller holding the session cookie can confirm without any preview having been rendered. What protects the write is vmem's own check: it recomputes the preview from the current vault and writes only when the fingerprint still matches, so a stale or invented fingerprint is answered with the fresh preview instead of a write. Reaching the API at all takes the one-time sign-in link's cookie, a same-origin `Origin` and the loopback Host, which bounds who can call but does not prove that a person looked. `acon` does this differently (its server mints a confirm token) because the console renders the preview itself.
 - A provider failure is logged to the terminal and answered with the reason and the next step.
-- The page is a placeholder until the client UI lands; the settings panel is not implemented yet.
+- The page runs the existing client panels; the settings panel is not implemented yet.
+
 
 ## License
 
