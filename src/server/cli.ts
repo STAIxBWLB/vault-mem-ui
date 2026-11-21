@@ -22,6 +22,7 @@ export interface RunOptions {
 
 export const USAGE = `usage: vmem-ui [--port <n>] [--idle-minutes <n>]
 Serves the vault-mem console on 127.0.0.1 and prints a one-time sign-in link.
+The vault is the home vmem resolves: VMEM_HOME, else ~/.agenthub/vmem.
   --port <n>          loopback port (default: a free port)
   --idle-minutes <n>  exit after this many minutes without a request (default: ${DEFAULT_IDLE_MS / 60_000})`;
 
@@ -32,9 +33,10 @@ export function parseArgs(argv: string[]): { port: number; idleMs: number; help:
     if (a === "-h" || a === "--help") { help = true; continue; }
     if (a === "--port" || a === "--idle-minutes") {
       const raw = argv[++i];
-      const n = Number(raw);
-      if (raw === undefined || !Number.isInteger(n) || n < 0 || (a === "--port" && n > 65535) || (a === "--idle-minutes" && n < 1)) {
-        return { error: `${a} needs ${a === "--port" ? "a port number from 0 to 65535" : "a whole number of minutes, 1 or more"}; got ${raw ?? "nothing"}` };
+      // Decimal digits only: Number("") is 0, Number("0x10") is 16 and Number(" 80 ") is 80, and none of those is a port.
+      const n = raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : NaN;
+      if (!Number.isSafeInteger(n) || (a === "--port" && n > 65535) || (a === "--idle-minutes" && n < 1)) {
+        return { error: `${a} needs ${a === "--port" ? "a port number from 0 to 65535" : "a whole number of minutes, 1 or more"}; got ${raw === undefined || raw === "" ? "nothing" : raw}` };
       }
       if (a === "--port") port = n; else idleMs = n * 60_000;
       continue;
@@ -49,6 +51,8 @@ export async function run(options: RunOptions): Promise<Host | null> {
   const parsed = parseArgs(options.argv);
   if ("error" in parsed) { options.err(`vmem-ui: ${parsed.error}`); return null; }
   if (parsed.help) { options.out(USAGE); return null; }
+  // The console contract's context takes the family home. vmem resolves the served vault home itself — VMEM_HOME, then
+  // a `home` pointer in the default home's config, then `$AGENTHUB_HOME/vmem` — so this value never selects the vault.
   const home = options.env.AGENTHUB_HOME ?? join(homedir(), ".agenthub");
   let provider: Awaited<ReturnType<typeof plugin.open>>;
   try {
@@ -62,9 +66,10 @@ export async function run(options: RunOptions): Promise<Host | null> {
   try {
     host = startHost({
       provider, manifest: plugin.manifest, assets: options.assets, port: parsed.port, idleMs: parsed.idleMs,
+      log: (line) => options.err(line),
       onIdle: () => {
         options.out(`vmem-ui: no requests for ${parsed.idleMs / 60_000} minutes; stopped. Run vmem-ui again to reopen.`);
-        void (provider.close?.() ?? Promise.resolve()).finally(() => options.exit(0));
+        options.exit(0);
       },
     });
   } catch (e) {
@@ -75,4 +80,10 @@ export async function run(options: RunOptions): Promise<Host | null> {
   }
   options.out(`vmem-ui: open this one-time link in your browser (valid 5 minutes):\n${host.issue()}`);
   return host;
+}
+
+/** The one shutdown path: close the host (and with it the provider), then exit. Signals and the idle exit both use it. */
+export async function shutdown(host: Host, exit: (code: number) => void): Promise<void> {
+  await host.close();
+  exit(0);
 }
