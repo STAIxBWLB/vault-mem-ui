@@ -285,6 +285,15 @@ function cellAlign(delimiter: string): Align {
 }
 
 export function parseInline(text: string, depth = 0): Inline[] {
+  return inlinePass(text, depth, true);
+}
+
+/**
+ * The inline pass. `links` is off while a link's own label is read: an anchor cannot hold an anchor, so a link written
+ * inside a label stays the text it was, and skipping it there is also what keeps nested labels from being parsed once
+ * per level.
+ */
+function inlinePass(text: string, depth: number, links: boolean): Inline[] {
   if (depth >= MAX_INLINE_DEPTH) return text ? [{ kind: "text", text }] : [];
   const out: Inline[] = [];
   const delimiters = delimiterIndex(text);
@@ -335,7 +344,7 @@ export function parseInline(text: string, depth = 0): Inline[] {
         continue;
       }
     }
-    if (char === "[") {
+    if (char === "[" && links) {
       const span = (text[at + 1] === "[" ? wikiSpan(text, at) : null) ?? bracketLink(text, at, false, depth);
       if (span) {
         flush();
@@ -344,7 +353,7 @@ export function parseInline(text: string, depth = 0): Inline[] {
         continue;
       }
     }
-    if (char === "<") {
+    if (char === "<" && links) {
       const span = autolink(text, at);
       if (span) {
         flush();
@@ -354,7 +363,7 @@ export function parseInline(text: string, depth = 0): Inline[] {
       }
     }
     if (char === "*" || char === "_") {
-      const span = emphasis(text, at, delimiters, depth);
+      const span = emphasis(text, at, delimiters, depth, links);
       if (span) {
         flush();
         out.push(span.node);
@@ -432,9 +441,27 @@ function bracketLink(text: string, at: number, image: boolean, depth: number): S
   }
   if (cursor >= text.length || text[cursor + 1] !== "(") return null;
   const label = text.slice(open, cursor);
+  const inside = destination(text, cursor + 1);
+  if (!inside) return null;
+  const target = linkTarget(inside.dest);
+  if (!target) return null;
+  const end = inside.end;
+  // An image target is shown, not fetched, so it is kept as written; a link target has to pass the scheme check.
+  if (image) return { node: { kind: "image", alt: label.trim(), src: target }, end: end + 1 };
+  const href = safeHref(target);
+  if (!href) return null;
+  // An anchor cannot hold an anchor, so a link inside this label is left as the text it was written as. The label is
+  // read with links off for that reason, and also for cost: refusing this outer link instead (letting the inner one
+  // win, as CommonMark has it) meant the label was parsed and then re-parsed again from the next character at every
+  // nesting level, which doubles the work per level — 320 ms at depth 20 and minutes at depth 3000.
+  return { node: { kind: "link", href, children: inlinePass(label, depth + 1, false) }, end: end + 1 };
+}
+
+/** The destination of `(…)` starting at `open`, read the way a link target is, and the index of its closing paren. */
+function destination(text: string, open: number): { dest: string; end: number } | null {
   let dest = "";
   let parens = 1;
-  let end = cursor + 2;
+  let end = open + 1;
   for (; end < text.length; end += 1) {
     const char = text[end]!;
     if (char === "\\") {
@@ -456,23 +483,7 @@ function bracketLink(text: string, at: number, image: boolean, depth: number): S
     }
     dest += char;
   }
-  if (parens) return null;
-  const target = linkTarget(dest);
-  if (!target) return null;
-  // An image target is shown, not fetched, so it is kept as written; a link target has to pass the scheme check.
-  if (image) return { node: { kind: "image", alt: label.trim(), src: target }, end: end + 1 };
-  const href = safeHref(target);
-  if (!href) return null;
-  const children = parseInline(label, depth + 1);
-  // An anchor cannot hold an anchor, and the inline pass below would build one from the label: the inner link wins and
-  // this outer one stays the text it was, which is also what the scanner does when it reaches the inner link itself.
-  if (hasLink(children)) return null;
-  return { node: { kind: "link", href, children }, end: end + 1 };
-}
-
-function hasLink(nodes: Inline[]): boolean {
-  return nodes.some((node) => node.kind === "link" ||
-    ((node.kind === "strong" || node.kind === "em") && hasLink(node.children)));
+  return parens ? null : { dest, end };
 }
 
 /** The target of `[label](target "title")`, without the optional title. */
@@ -553,7 +564,7 @@ function delimiterIndex(text: string): Delimiters {
   return { runAt, closeAt };
 }
 
-function emphasis(text: string, at: number, delimiters: Delimiters, depth: number): Span | null {
+function emphasis(text: string, at: number, delimiters: Delimiters, depth: number, links: boolean): Span | null {
   const char = text[at]!;
   const run = delimiters.runAt(at, char);
   const width = Math.min(run, 2);
@@ -563,6 +574,6 @@ function emphasis(text: string, at: number, delimiters: Delimiters, depth: numbe
   if (char === "_" && at > 0 && WORD.test(text[at - 1]!)) return null;
   const close = delimiters.closeAt(open, char, width);
   if (close < 0) return null;
-  const children = parseInline(text.slice(open, close), depth + 1);
+  const children = inlinePass(text.slice(open, close), depth + 1, links);
   return { node: width === 2 ? { kind: "strong", children } : { kind: "em", children }, end: close + width };
 }
