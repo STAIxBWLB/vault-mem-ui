@@ -6,6 +6,8 @@
       "name": "@staix/vault-mem-ui",
       "dependencies": {
         "@staix/vault-mem": "0.11.0",
+        "graphology": "0.26.0",
+        "graphology-layout-forceatlas2": "0.10.1",
         "react": "^19.2.0",
         "react-dom": "^19.2.0",
       },
@@ -47,6 +49,16 @@
     "csstype": ["csstype@3.2.4", "", {}, "sha512-PoKaoPzQapnEoqUSnHx1u6W6ku8CVEgKsnpmmzU3m1nwkidpPBQ8V/Zq2+bWNrsOKoKLwTGdbx6xF7BXP1zLVQ=="],
 
     "entities": ["entities@7.0.1", "", {}, "sha512-TWrgLOFUQTH994YUyl1yT4uyavY5nNB5muff+RtWaqNVCAK408b5ZnnbNAUEWLTCpum9w6arT70i1XdQ4UeOPA=="],
+
+    "events": ["events@3.3.0", "", {}, "sha512-mQw+2fkQbALzQ7V0MY0IqdnXNOeTtP4r0lN9z7AAawCXgqea7bDii20AYrIBrFd/Hx0M2Ocz6S111CaFkUcb0Q=="],
+
+    "graphology": ["graphology@0.26.0", "", { "dependencies": { "events": "^3.3.0" }, "peerDependencies": { "graphology-types": ">=0.24.0" } }, "sha512-8SSImzgUUYC89Z042s+0r/vMibY7GX/Emz4LDO5e7jYXhuoWfHISPFJYjpRLUSJGq6UQ6xlenvX1p/hJdfXuXg=="],
+
+    "graphology-layout-forceatlas2": ["graphology-layout-forceatlas2@0.10.1", "", { "dependencies": { "graphology-utils": "^2.1.0" }, "peerDependencies": { "graphology-types": ">=0.19.0" } }, "sha512-ogzBeF1FvWzjkikrIFwxhlZXvD2+wlY54lqhsrWprcdPjopM2J9HoMweUmIgwaTvY4bUYVimpSsOdvDv1gPRFQ=="],
+
+    "graphology-types": ["graphology-types@0.24.8", "", {}, "sha512-hDRKYXa8TsoZHjgEaysSRyPdT6uB78Ci8WnjgbStlQysz7xR52PInxNsmnB7IBOM1BhikxkNyCVEFgmPKnpx3Q=="],
+
+    "graphology-utils": ["graphology-utils@2.5.2", "", { "peerDependencies": { "graphology-types": ">=0.23.0" } }, "sha512-ckHg8MXrXJkOARk56ZaSCM1g1Wihe2d6iTmz1enGOz4W/l831MBCKSayeFQfowgF8wd+PQ4rlch/56Vs/VZLDQ=="],
 
     "happy-dom": ["happy-dom@21.0.4", "", { "dependencies": { "@types/node": ">=20.0.0", "@types/whatwg-mimetype": "^3.0.2", "@types/ws": "^8.18.1", "buffer-image-size": "^0.6.4", "entities": "^7.0.1", "whatwg-mimetype": "^3.0.0", "ws": "^8.21.0" } }, "sha512-tFm+GaLBgo6o0awHnvHaNoraVo27qJ+2tZEtZ+cIa08hXbeitrxAJajLI05hsUy/2/YTKcUjQYzHe5mCcraLBw=="],
 
