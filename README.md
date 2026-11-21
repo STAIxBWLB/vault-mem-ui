@@ -4,7 +4,9 @@ Web UI for [vmem](https://github.com/STAIxBWLB/vault-mem): a standalone browser 
 
 ## Status
 
-Planned. Nothing is implemented or published yet; the package `@staix/vault-mem-ui` does not exist on npm. The design is tracked in this repository's issues.
+Not implemented or published yet. The repository contains the package scaffold and checks; the panel, standalone host and console plugin are still to come. The design is tracked in this repository's issues.
+
+For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run check`.
 
 ## Scope
 
