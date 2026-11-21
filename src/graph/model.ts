@@ -101,7 +101,8 @@ export function buildGraphModel(input: GraphInput, builtAt: number = Date.now())
       type,
       domain: n.domain?.trim() || null,
       degree: 0,
-      community: communities?.[n.id] ?? null,
+      // Own properties only: an id such as `constructor` must not read Object.prototype.
+      community: communities && Object.hasOwn(communities, n.id) && Number.isFinite(communities[n.id]) ? communities[n.id]! : null,
       isGodNode: false,
       date: n.date ?? null,
       updatedAt: n.relPath === null ? null : (n.updatedAt ?? null),

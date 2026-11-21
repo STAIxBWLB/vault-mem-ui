@@ -91,6 +91,19 @@ describe("buildGraphModel", () => {
     expect(enriched.nodes.find((n) => n.id === "missing-target")!.community).toBeNull();
   });
 
+  it("reads communities only from own properties, so ids like constructor get none", () => {
+    const model = buildGraphModel({
+      nodes: [
+        { id: "constructor", label: "constructor", relPath: "notes/constructor.md" },
+        { id: "toString", label: "toString", relPath: "notes/toString.md" },
+        { id: "own", label: "own", relPath: "notes/own.md" },
+      ],
+      edges: [],
+      communities: { own: 2 },
+    });
+    expect(model.nodes.map((n) => [n.id, n.community])).toEqual([["constructor", null], ["toString", null], ["own", 2]]);
+  });
+
   it("does not mutate its input", () => {
     const copy = structuredClone(INPUT);
     buildGraphModel(INPUT);
