@@ -6,6 +6,8 @@ Web UI for [vmem](https://github.com/STAIxBWLB/vault-mem): a standalone browser 
 
 Not published yet. The repository contains the package scaffold, checks, standalone host command, client panels and `acon` console plugin. The design is tracked in this repository's issues.
 
+The graph panel (Sigma canvas, ForceAtlas2 in the panel's own module worker, local view, shortest path, pins and level of detail above 30,000 edges) is in place and shows "Graph not available" until the vmem provider sends a graph snapshot (vault-mem #266).
+
 For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run check`.
 
 ## Client

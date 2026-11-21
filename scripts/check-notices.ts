@@ -4,7 +4,13 @@ export function missingNotices(inputs: string[], notices: string): string[] {
   for (const input of inputs) {
     const normalized = input.replaceAll("\\", "/");
     if (normalized.startsWith("src/") || normalized.startsWith("./src/")) continue;
+    // Bun bundles its own browser polyfill for a `node:` builtin (for example `node:events`); it needs a notice too.
+    const builtin = /^node:[a-z_/]+$/.test(normalized) ? normalized : null;
     const match = normalized.match(/(?:^|\/)node_modules\/((?:@[^/]+\/)?[^/]+)(?:\/|$)/);
+    if (builtin) {
+      if (!new RegExp(`^## ${builtin}\\s*\\n+License: \\S`, "m").test(notices)) missing.add(builtin);
+      continue;
+    }
     if (!match) {
       missing.add(input);
       continue;

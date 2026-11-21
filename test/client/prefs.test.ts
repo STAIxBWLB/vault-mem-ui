@@ -46,7 +46,7 @@ describe("readPrefs", () => {
   test("keeps the stored value that is one of ours and replaces the rest with the default", () => {
     const stored = memoryStorage({ [KEY]: JSON.stringify({ theme: "dark", lastPanel: "lint" }) });
     expect(readPrefs(stored)).toEqual({ theme: "dark", lastPanel: "lint" });
-    expect(readPrefs(memoryStorage({ [KEY]: JSON.stringify({ theme: "solarized", lastPanel: "graph" }) }))).toEqual(DEFAULT_PREFS);
+    expect(readPrefs(memoryStorage({ [KEY]: JSON.stringify({ theme: "solarized", lastPanel: "timeline" }) }))).toEqual(DEFAULT_PREFS);
     expect(readPrefs(memoryStorage({ [KEY]: JSON.stringify({ theme: "light", lastPanel: 3 }) }))).toEqual({
       theme: "light",
       lastPanel: DEFAULT_PREFS.lastPanel,
@@ -69,7 +69,7 @@ describe("writePrefs", () => {
 
   test("a value that is not ours is stored as the default it falls back to", () => {
     const storage = memoryStorage();
-    expect(writePrefs({ theme: "paper", lastPanel: "graph" } as never, storage)).toEqual(DEFAULT_PREFS);
+    expect(writePrefs({ theme: "paper", lastPanel: "timeline" } as never, storage)).toEqual(DEFAULT_PREFS);
     expect(JSON.parse(storage.data[KEY]!)).toEqual(DEFAULT_PREFS);
   });
 
@@ -110,7 +110,7 @@ describe("browserStorage", () => {
 
 describe("isPanelId", () => {
   test("accepts exactly the panels the client renders", () => {
-    for (const id of ["overview", "notes", "note", "promote", "lint", "log"]) expect(isPanelId(id)).toBe(true);
-    for (const id of ["graph", "", "Overview", "settings", 7, null, undefined]) expect(isPanelId(id)).toBe(false);
+    for (const id of ["overview", "notes", "note", "promote", "lint", "log", "graph"]) expect(isPanelId(id)).toBe(true);
+    for (const id of ["timeline", "", "Overview", "settings", 7, null, undefined]) expect(isPanelId(id)).toBe(false);
   });
 });

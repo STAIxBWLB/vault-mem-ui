@@ -440,3 +440,30 @@
     flex: 1;
   }
 }
+
+/* Graph panel (M2). The canvas takes the remaining height; Sigma sizes its own canvases inside it. */
+.vmem-graph {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 420px;
+}
+.vmem-graph-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.vmem-graph-canvas {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 360px;
+  border: 1px solid var(--vmem-line);
+  border-radius: var(--vmem-radius);
+  background: var(--vmem-surface);
+  overflow: hidden;
+}
+.vmem-graph-canvas:focus-visible {
+  outline: 2px solid var(--vmem-accent);
+  outline-offset: 2px;
+}

@@ -6,4 +6,6 @@ test("bundle inputs require a package notice and license", () => {
   expect(missingNotices(inputs, "")).toEqual(["react", "@scope/pkg"]);
   expect(missingNotices(inputs, "## react\nLicense: MIT\n\n## @scope/pkg\nLicense: Apache-2.0\n")).toEqual([]);
   expect(missingNotices(["outside/file.js"], "")).toEqual(["outside/file.js"]);
+  expect(missingNotices(["node:events"], "")).toEqual(["node:events"]);
+  expect(missingNotices(["node:events"], "## node:events\nLicense: MIT\n")).toEqual([]);
 });

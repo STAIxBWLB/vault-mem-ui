@@ -7,7 +7,7 @@ export interface Prefs {
   lastPanel: string;
 }
 
-export const PANEL_IDS = ["overview", "notes", "note", "promote", "lint", "log"] as const;
+export const PANEL_IDS = ["overview", "notes", "note", "promote", "lint", "log", "graph"] as const;
 export type PanelId = (typeof PANEL_IDS)[number];
 
 export const DEFAULT_PREFS: Prefs = { theme: "system", lastPanel: "overview" };

@@ -15,6 +15,7 @@ import { NoteView } from "./views/note.tsx";
 import { NotesView } from "./views/notes.tsx";
 import { OverviewView } from "./views/overview.tsx";
 import { PromoteView } from "./views/promote.tsx";
+import { GraphPanel } from "../graph/view/GraphView.tsx";
 
 const TITLES: Record<string, string> = {
   overview: "Overview",
@@ -23,6 +24,7 @@ const TITLES: Record<string, string> = {
   promote: "Promote",
   lint: "Lint",
   log: "Log",
+  graph: "Graph",
 };
 
 const VIEWS = {
@@ -32,6 +34,7 @@ const VIEWS = {
   promote: PromoteView,
   lint: LintView,
   log: LogView,
+  graph: GraphPanel,
 };
 
 export type Navigate = (panel: string, params?: Record<string, string>) => void;
