@@ -39,6 +39,11 @@ const allows = [
   'const css = readFileSync(new URL("../../dist/panel.css", import.meta.url), "utf8");\nimport { readFileSync } from "node:fs";',
 ];
 const refuses: [string, string][] = [
+  ['class URL { constructor() { return new globalThis.URL("file:///tmp/other") } }; import { readFileSync } from "node:fs"; readFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a shadowing URL class"],
+  ['import { readFileSync } from "./other.ts"; readFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a reader imported from another module"],
+  ['import { readFileSync } from "node:fs"; function f(URL: unknown) { return URL }', "a URL parameter"],
+  ['import { readFileSync } from "node:fs"; const URL = globalThis.URL;', "a URL variable"],
+  ['import { URL } from "./other.ts"; import { readFileSync } from "node:fs";', "an imported URL"],
   ['readFileSync(vaultPath, "utf8"); import { readFileSync } from "node:fs";', "a variable read before its hoisted import"],
   ['const read = readFileSync; read(vaultPath, "utf8"); import { readFileSync } from "node:fs";', "an alias before its hoisted import"],
   ['import { readFileSync } from "node:fs"; readFileSync("../../dist/panel.js", "utf8");', "a working-directory-relative asset path"],

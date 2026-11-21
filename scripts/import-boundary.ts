@@ -35,6 +35,9 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
   }
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+      if (node.moduleSpecifier.text !== "node:fs") {
+        problems.push(`${at(node)}: the panel asset reader must import readFileSync from node:fs`);
+      }
       const clause = node.importClause;
       const named = clause?.namedBindings;
       if (!clause || clause.isTypeOnly || clause.name || !named || !ts.isNamedImports(named)) {
@@ -48,6 +51,12 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
         }
         local.add(element.name.text);
       }
+    }
+    // Only the global URL constructor at a new-expression site is allowed here. A local declaration,
+    // parameter, import or other reference named URL could redirect a supposedly fixed asset read.
+    if (ts.isIdentifier(node) && node.text === "URL" &&
+        !(ts.isNewExpression(node.parent) && node.parent.expression === node)) {
+      problems.push(`${at(node)}: URL must be the global constructor and may not be rebound`);
     }
     // A dynamic import or require would reach every member of the module without naming one.
     if (ts.isCallExpression(node) && (node.expression.kind === ts.SyntaxKind.ImportKeyword || (ts.isIdentifier(node.expression) && node.expression.text === "require"))) {
