@@ -4,14 +4,19 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "engines": { "bun": ">=1.4.2" },
+  "engines": {
+    "bun": ">=1.4.2"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "build": "bun build src/client/panel.ts --outdir dist --target browser --format esm --minify && cp src/client/panel.css dist/panel.css",
+    "build": "bun build src/client/panel.ts --outdir dist --target browser --format esm --minify --metafile=dist/metafile.json && cp src/client/panel.css dist/panel.css && bun run scripts/check-notices.ts",
     "check": "bun run typecheck && bun run test && bun run build"
   },
-  "dependencies": { "@staix/vault-mem": "0.11.0", "react": "^19.2.0" },
+  "dependencies": {
+    "@staix/vault-mem": "0.11.0",
+    "react": "^19.2.0"
+  },
   "devDependencies": {
     "@staix/agent-console": "github:STAIxBWLB/agent-console#8babe31f421682670a17ee2498f485e6f9ea20a5",
     "@types/bun": "^1.4.2",
