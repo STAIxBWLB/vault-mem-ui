@@ -5,7 +5,8 @@
     "moduleResolution": "Bundler",
     "strict": true,
     "noEmit": true,
+    "allowImportingTsExtensions": true,
     "types": ["bun"]
   },
-  "include": ["src", "scripts", "test"]
+  "include": ["src", "scripts", "test", "bin"]
 }
