@@ -151,6 +151,23 @@ test("bounds request bodies", async () => {
   expect(calls).toEqual([]);
 });
 
+test("far oversized bodies (declared and streamed) still get an actionable 413", async () => {
+  const { host, calls } = start({ maxBodyBytes: 1024 });
+  const cookie = await signIn(host);
+  for (const size of [70_000, 8 * 1024 * 1024]) {
+    const declared = await post(host, "/api/action", { action: "delete", pad: "x".repeat(size) }, { cookie });
+    expect(declared.status).toBe(413);
+    expect((await declared.json()).error).toBe("request body is over the 1024 byte limit; send a smaller request");
+    const chunk = new TextEncoder().encode("x".repeat(64 * 1024));
+    let sent = 0;
+    const stream = new ReadableStream({ pull(c) { if (sent >= size) return c.close(); sent += chunk.byteLength; c.enqueue(chunk); } });
+    const streamed = await fetch(host.origin + "/api/action", { method: "POST", headers: { cookie, origin: host.origin, "content-type": "application/json" }, body: stream, duplex: "half" } as RequestInit);
+    expect(streamed.status).toBe(413);
+    expect((await streamed.json()).error).toBe("request body is over the 1024 byte limit; send a smaller request");
+  }
+  expect(calls).toEqual([]);
+});
+
 test("relays snapshot and refuses unknown panels", async () => {
   const { host, calls } = start();
   const cookie = await signIn(host);

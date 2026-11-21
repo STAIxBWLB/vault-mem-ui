@@ -15,7 +15,6 @@ export const DEFAULT_MAX_BODY_BYTES = 32 * 1024;
 const TICKET_MS = 5 * 60_000;
 const SESSION_MS = 12 * 60 * 60_000;
 const MAX_TICKETS = 16;
-const HARD_BODY_SLACK = 64 * 1024;
 
 export interface ClientAssets {
   /** The client bundle (M1-a build output); a placeholder until the client lands. */
@@ -181,9 +180,10 @@ export function startHost(options: HostOptions): Host {
   const server: Server<undefined> = Bun.serve({
     hostname: "127.0.0.1",
     port: options.port ?? 0,
-    // Bun's own cap is a hard backstop above the app limit, so an oversized body normally reaches readJsonBody and
-    // gets an actionable 413; anything past the backstop is cut off by Bun without being buffered.
-    maxRequestBodySize: maxBody + HARD_BODY_SLACK,
+    // Bun's own limit answers with an empty 413 before fetch runs, so it is set out of reach. The bound is enforced in
+    // readJsonBody instead: a declared Content-Length over the limit is refused unread, and a streamed body is cancelled
+    // as soon as it passes the limit, so at most maxBody bytes plus one chunk are ever held.
+    maxRequestBodySize: Number.MAX_SAFE_INTEGER,
     async fetch(req) {
       lastSeen = now();
       armIdle();
