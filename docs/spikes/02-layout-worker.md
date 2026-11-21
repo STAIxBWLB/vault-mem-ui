@@ -178,12 +178,12 @@ ms at 100,000, and 38.7 ms in one no-render window, a stall that no batch in it 
 
 Throughput is the price. Across the 19 runs it spans 5-50 iterations per second: 16-37 under
 16 ms batches in the frame-capped arms, 5-26 in the 3 s soaks, and 50 under 100 ms batches.
-Batching is what keeps the median frame at 60 Hz. At 100,000 edges the 100 ms arm pays the same
-18.5-21.8 ms per applied batch as the 16 ms arm, but applies it on 16% of frames instead of
-23-29%. That is still not frame-rate safe at that size: the block shows in the p95 (20.1-20.6 ms)
-and in the worst frame (23.9-33.4 ms). Moving the layout off the main thread does not by itself
-make a 100,000-edge graph frame-rate safe; the repaint has to be cheaper or leave the frame path
-too.
+Batching is what holds the median frame on the 16.7 ms cadence. At 100,000 edges the 100 ms arm
+pays the same 18.5-21.8 ms per applied batch as the 16 ms arm, but applies it on 16% of frames
+instead of 23-29%. That is still not frame-rate safe at that size: the block shows in the p95
+(20.1-20.6 ms) and in the worst frame (23.9-33.4 ms). Moving the layout off the main thread does
+not by itself make a 100,000-edge graph frame-rate safe; the repaint has to be cheaper or leave
+the frame path too.
 
 **A cost burst runs through the worker numbers.** In 12 of 19 worker runs some iterations jump
 from about 27 ms to 240-320 ms, mostly in bursts of a few consecutive iterations; in 11 of them
