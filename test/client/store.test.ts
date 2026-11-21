@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createFakeHost, type FakeHost } from "../../src/client/fake.ts";
-import type { ActionResult, SnapshotInput, SnapshotReply } from "../../src/client/host.ts";
+import type { ActionResult, ActionInput, SnapshotInput, SnapshotReply } from "../../src/client/host.ts";
 import type { StorageLike } from "../../src/client/prefs.ts";
 import { createStore, resolveTheme } from "../../src/client/store.ts";
 
@@ -30,6 +30,23 @@ function deferred(host: FakeHost = createFakeHost()): { host: FakeHost; pending:
     new Promise<SnapshotReply>((resolve, reject) => {
       pending.push({ input, resolve, reject });
     });
+  return { host, pending };
+}
+
+interface PendingAction {
+  input: ActionInput;
+  resolve(reply: ActionResult): void;
+}
+
+/** A host whose actions answer only when the test says so, so a write can be left in flight across a navigation. */
+function deferredAction(host: FakeHost = createFakeHost()): { host: FakeHost; pending: PendingAction[] } {
+  const pending: PendingAction[] = [];
+  host.action = (input) => {
+    host.calls.action.push(input);
+    return new Promise<ActionResult>((resolve) => {
+      pending.push({ input, resolve });
+    });
+  };
   return { host, pending };
 }
 
@@ -276,6 +293,65 @@ describe("writes", () => {
     store.setWrite({ phase: "idle" });
     await store.confirmWriteNow();
     expect(host.calls.action).toHaveLength(1);
+  });
+
+  test("a preview that answers after the person left the note does not open on the new one", async () => {
+    const { host, pending } = deferredAction();
+    const store = createStore(host);
+    const writing = store.beginWrite({ action: "delete", path: "notes/a.md", vault: "personal" });
+    store.show("note", { path: "notes/b.md", vault: "personal" });
+    pending[0]!.resolve({ ok: false, needsConfirm: true, fingerprint: "sha256:abc", verb: "Delete note a", preview: ["delete notes/a.md"] });
+    await writing;
+    expect(store.getState().write).toEqual({ phase: "idle" });
+    expect(store.getState().params).toEqual({ path: "notes/b.md", vault: "personal" });
+    // A's preview is gone, so it cannot be confirmed from B either.
+    await store.confirmWriteNow();
+    expect(host.calls.action).toHaveLength(1);
+  });
+
+  test("a preview that answers after Cancel never opens", async () => {
+    const { host, pending } = deferredAction();
+    const store = createStore(host);
+    const writing = store.beginWrite({ action: "delete", path: "notes/a.md" });
+    store.setWrite({ phase: "idle" });
+    pending[0]!.resolve({ ok: false, needsConfirm: true, fingerprint: "sha256:abc", preview: ["delete notes/a.md"] });
+    await writing;
+    expect(store.getState().write).toEqual({ phase: "idle" });
+    await store.confirmWriteNow();
+    expect(host.calls.action).toHaveLength(1);
+  });
+
+  test("the newest write is the one that lands when two are in flight", async () => {
+    const { host, pending } = deferredAction();
+    const store = createStore(host);
+    const first = store.beginWrite({ action: "delete", path: "notes/a.md" });
+    const second = store.beginWrite({ action: "move", from: "notes/b.md", to: "archive" });
+    pending[1]!.resolve({ ok: false, needsConfirm: true, fingerprint: "sha256:def", verb: "Move note b" });
+    await second;
+    pending[0]!.resolve({ ok: false, needsConfirm: true, fingerprint: "sha256:abc", verb: "Delete note a" });
+    await first;
+    expect(store.getState().write).toMatchObject({ phase: "preview", fingerprint: "sha256:def", verb: "Move note b" });
+  });
+
+  test("a confirmation that answers after the panel changed is not reported on the new one", async () => {
+    const host = createFakeHost({ replies: { delete: { ok: false, needsConfirm: true, fingerprint: "sha256:abc" } } });
+    const store = createStore(host);
+    await store.beginWrite({ action: "delete", path: "notes/a.md" });
+    expect(store.getState().write.phase).toBe("preview");
+
+    const pending: PendingAction[] = [];
+    host.action = (input) => {
+      host.calls.action.push(input);
+      return new Promise<ActionResult>((resolve) => pending.push({ input, resolve }));
+    };
+    const confirming = store.confirmWriteNow();
+    store.show("lint");
+    const asked = host.calls.snapshot.length;
+    pending[0]!.resolve({ ok: true, message: "Delete note: done" });
+    await confirming;
+    expect(store.getState().write).toEqual({ phase: "idle" });
+    // The dialog did not reload the new panel behind the person, so its own load is the only snapshot.
+    expect(host.calls.snapshot.length).toBe(asked);
   });
 });
 

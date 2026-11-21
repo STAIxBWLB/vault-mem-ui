@@ -58,6 +58,13 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
     for (const listener of listeners) listener(state);
   };
   let asked = 0;
+  // The write flow that owns the dialog right now. A pending preview or confirmation may only land while its ticket
+  // is still current, so a reply cannot reopen a write on a panel or view the person already left, or after Cancel.
+  let ticket = 0;
+  const own = (write: WriteState) => {
+    ticket += 1;
+    set({ write });
+  };
 
   const store: ClientStore = {
     getState: () => state,
@@ -72,6 +79,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // The reply belongs to the panel and parameters it was asked for: keeping it would show the previous note's
       // content, and let its delete or move run under the newly chosen vault. An open preview goes with it, since
       // its input carries the old path.
+      ticket += 1;
       set({ panel: next, params, phase: "loading", error: undefined, reply: null, write: { phase: "idle" } });
       void store.refresh();
     },
@@ -98,10 +106,14 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       set({ prefs: writePrefs({ ...state.prefs, theme }, storage), theme: resolveTheme(theme, host.theme()) });
     },
     setWrite(write) {
-      set({ write });
+      // Closing or replacing the dialog also supersedes whatever is still being asked for.
+      own(write);
     },
     async beginWrite(input) {
+      const mine = ++ticket;
       const result = await startWrite(host, input);
+      // The person moved to another panel, another note or another write while this preview was in flight.
+      if (mine !== ticket) return;
       // A host that owns the confirmation already told the person through its own notification (`quiet`), so the
       // panel keeps no dialog state for it; anything else is shown here.
       set({ write: result.phase === "done" && result.quiet ? { phase: "idle" } : result });
@@ -110,7 +122,9 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
     async confirmWriteNow() {
       const current = state.write;
       if (current.phase !== "preview") return;
+      const mine = ++ticket;
       const result = await confirmWrite(host, current);
+      if (mine !== ticket) return;
       set({ write: result });
       if (result.phase === "done") void store.refresh();
     },
