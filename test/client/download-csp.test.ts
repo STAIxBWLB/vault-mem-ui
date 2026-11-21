@@ -20,12 +20,17 @@ test.skipIf(!browser && !process.env.CI)("graph export downloads under the conso
     return new Response('<!doctype html><button id="go">Export</button><script type="module" src="/boot.js"></script>', { headers: { "Content-Type": "text/html", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-src 'self'; frame-ancestors 'none'" } });
   } });
   const root = mkdtempSync(join(tmpdir(), "vmem-export-csp-"));
-  const child = Bun.spawn([browser!, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run", `--user-data-dir=${root}`, "--remote-debugging-port=0", "about:blank"], { stdout: "ignore", stderr: "ignore" });
+  const child = Bun.spawn([browser!, "--headless", "--disable-gpu", "--no-sandbox", "--no-first-run", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-extensions", `--user-data-dir=${root}`, "--remote-debugging-port=0", "about:blank"], { stdout: "ignore", stderr: "pipe" });
+  const browserErrors = new Response(child.stderr).text();
   let socket: WebSocket | undefined;
   try {
     const devtools = join(root, "DevToolsActivePort");
-    for (let i = 0; i < 100 && !existsSync(devtools); i++) await Bun.sleep(100);
-    expect(existsSync(devtools)).toBe(true);
+    for (let i = 0; i < 300 && !existsSync(devtools) && child.exitCode === null; i++) await Bun.sleep(100);
+    if (!existsSync(devtools)) {
+      if (child.exitCode === null) child.kill();
+      const exit = await child.exited;
+      throw new Error(`Chrome did not expose DevTools within 30 seconds (exit ${exit}); stderr: ${await browserErrors}`);
+    }
     const [port, endpoint] = readFileSync(devtools, "utf8").trim().split("\n");
     socket = new WebSocket(`ws://127.0.0.1:${port}${endpoint}`);
     await new Promise<void>((resolve, reject) => { socket!.onopen = () => resolve(); socket!.onerror = () => reject(new Error("Could not connect to the test browser")); });
@@ -71,8 +76,9 @@ test.skipIf(!browser && !process.env.CI)("graph export downloads under the conso
     await waitForDocument(offlineSession, fileUrl, "Alpha (insight, 0 links)");
   } finally {
     socket?.close();
-    child.kill();
+    if (child.exitCode === null) child.kill();
     await child.exited;
+    await browserErrors;
     await server.stop(true);
     rmSync(root, { recursive: true, force: true });
   }
