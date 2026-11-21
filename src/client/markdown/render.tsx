@@ -159,24 +159,28 @@ function BlockNode(props: { block: Block; wiki: WikiIndex; onOpenNote?: OpenNote
   }
 }
 
-function inline(nodes: Inline[], wiki: WikiIndex, onOpenNote?: OpenNote): ReactNode {
-  return nodes.map((node, at) => <Fragment key={at}>{inlineNode(node, wiki, onOpenNote)}</Fragment>);
+/**
+ * `inAnchor` marks the label of a link: an anchor cannot hold an anchor, so inside a label an image's target and a
+ * wiki-link keep their text and lose the part that would be clickable, instead of nesting one anchor in another.
+ */
+function inline(nodes: Inline[], wiki: WikiIndex, onOpenNote?: OpenNote, inAnchor = false): ReactNode {
+  return nodes.map((node, at) => <Fragment key={at}>{inlineNode(node, wiki, onOpenNote, inAnchor)}</Fragment>);
 }
 
-function inlineNode(node: Inline, wiki: WikiIndex, onOpenNote?: OpenNote): ReactNode {
+function inlineNode(node: Inline, wiki: WikiIndex, onOpenNote?: OpenNote, inAnchor = false): ReactNode {
   switch (node.kind) {
     case "text":
       return node.text;
     case "code":
       return <code className="vmem-md-code">{node.text}</code>;
     case "strong":
-      return <strong>{inline(node.children, wiki, onOpenNote)}</strong>;
+      return <strong>{inline(node.children, wiki, onOpenNote, inAnchor)}</strong>;
     case "em":
-      return <em>{inline(node.children, wiki, onOpenNote)}</em>;
+      return <em>{inline(node.children, wiki, onOpenNote, inAnchor)}</em>;
     case "link":
       return (
         <a className="vmem-md-link" href={node.href} target="_blank" rel="noopener noreferrer">
-          {inline(node.children, wiki, onOpenNote)}
+          {inline(node.children, wiki, onOpenNote, true)}
         </a>
       );
     case "image":
@@ -185,19 +189,19 @@ function inlineNode(node: Inline, wiki: WikiIndex, onOpenNote?: OpenNote): React
       return (
         <span className="vmem-md-image">
           {node.alt ? <span className="vmem-md-image-alt">{node.alt}</span> : null}
-          {imageTarget(node.src)}
+          {imageTarget(node.src, inAnchor)}
         </span>
       );
     case "wiki":
-      return <Wiki node={node} wiki={wiki} onOpenNote={onOpenNote} />;
+      return <Wiki node={node} wiki={wiki} onOpenNote={inAnchor ? undefined : onOpenNote} />;
     case "break":
       return <br />;
   }
 }
 
-function imageTarget(src: string): ReactNode {
+function imageTarget(src: string, inAnchor: boolean): ReactNode {
   const href = safeHref(src);
-  if (!href) return <span className="vmem-md-image-src">{src}</span>;
+  if (!href || inAnchor) return <span className="vmem-md-image-src">{src}</span>;
   return (
     <a className="vmem-md-link" href={href} target="_blank" rel="noopener noreferrer">
       {src}
