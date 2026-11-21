@@ -34,6 +34,12 @@ describe("isFinitePositions", () => {
     expect(isFinitePositions(new Float64Array([1, NaN, 2]))).toBe(false);
     expect(isFinitePositions(new Float64Array([Infinity]))).toBe(false);
   });
+
+  it("accepts Float32Array worker batches", () => {
+    expect(isFinitePositions(new Float32Array([0, 1.5, -2e5]))).toBe(true);
+    expect(isFinitePositions(new Float32Array([1, NaN]))).toBe(false);
+    expect(isFinitePositions(new Float32Array([Infinity]))).toBe(false);
+  });
 });
 
 describe("sanitizePositions", () => {

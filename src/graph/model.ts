@@ -89,7 +89,9 @@ export function buildGraphModel(input: GraphInput, builtAt: number = Date.now())
   const nodes = new Map<string, GraphNode>();
   for (const n of input.nodes) {
     if (nodes.has(n.id)) continue;
-    const type = n.type?.trim() || (n.relPath === null ? "unresolved" : "untyped");
+    // Invariant: a node without a path is a ghost, whatever type the input claims; filters, chains and insights
+    // classify ghosts by type === "unresolved".
+    const type = n.relPath === null ? "unresolved" : (n.type?.trim() || "untyped");
     nodes.set(n.id, {
       id: n.id,
       label: n.label,

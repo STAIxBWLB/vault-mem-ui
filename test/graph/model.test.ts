@@ -37,9 +37,16 @@ describe("buildGraphModel", () => {
     expect(ghost).toMatchObject({ type: "unresolved", relPath: null, origin: "unknown", updatedAt: null });
   });
 
-  it("treats an input node without a path as unresolved", () => {
-    const model = buildGraphModel({ nodes: [{ id: "x", label: "X", relPath: null }], edges: [] });
+  it("treats an input node without a path as unresolved, even when the input gives it a type", () => {
+    const model = buildGraphModel({
+      nodes: [
+        { id: "x", label: "X", relPath: null },
+        { id: "ghost", label: "ghost", relPath: null, type: "decision", updatedAt: "2020-01-01T00:00:00Z" },
+      ],
+      edges: [],
+    });
     expect(model.nodes[0]).toMatchObject({ type: "unresolved", origin: "unknown" });
+    expect(model.nodes[1]).toMatchObject({ type: "unresolved", origin: "unknown", updatedAt: null });
   });
 
   it("dedupes (source, target, relation) triples, drops self loops and duplicate node ids", () => {
@@ -188,5 +195,31 @@ describe("isGeneratedNode", () => {
 
   it("never flags ghosts; they belong to the showUnresolved filter", () => {
     expect(isGeneratedNode(node({ type: "unresolved", relPath: null }), patterns)).toBe(false);
+  });
+});
+
+describe("pathless input nodes stay ghosts downstream", () => {
+  const input: GraphInput = {
+    nodes: [
+      { id: "real", label: "real", relPath: "notes/real.md", type: "decision", date: "2026-01-01" },
+      { id: "ghost", label: "ghost", relPath: null, type: "decision", date: "2026-02-01" },
+    ],
+    edges: [{ source: "real", target: "ghost", relation: "supersedes", fromFrontmatter: true }],
+  };
+  it("is hidden by showUnresolved=false and kept out of decision chains and orphans", async () => {
+    const { deriveGraphView } = await import("../../src/graph/derive");
+    const { buildDecisionChains } = await import("../../src/graph/decisionChains");
+    const { findOrphans } = await import("../../src/graph/insights");
+    const model = buildGraphModel(input);
+    const view = deriveGraphView({
+      model,
+      profile: { domains: [], origins: [], types: [], relations: [], community: null, showUnresolved: false, showGenerated: true, minVisibleNeighbors: 0 },
+      generatedPatterns: [], mode: "global", focusNodeId: null, localDepth: 2, localDirection: "both", search: "", searchAsFilter: false,
+    });
+    expect([...view.visibleNodeIds]).toEqual(["real"]);
+    const chains = buildDecisionChains(model);
+    expect(chains.chains).toEqual([]);
+    expect(chains.isolated.map((n) => n.id)).toEqual(["real"]);
+    expect(findOrphans(model).map((o) => o.id)).toEqual(["real"]);
   });
 });

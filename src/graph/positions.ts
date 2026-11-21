@@ -19,7 +19,7 @@ export function isUsableCoordinate(value: unknown): value is number {
 
 /** True when every coordinate in the buffer is finite. Used to gate the
  *  debounced disk-cache save — a single NaN would poison the whole cache. */
-export function isFinitePositions(positions: Float64Array): boolean {
+export function isFinitePositions(positions: ArrayLike<number>): boolean {
   for (let i = 0; i < positions.length; i += 1) {
     if (!Number.isFinite(positions[i])) return false;
   }
