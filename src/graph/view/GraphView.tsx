@@ -83,6 +83,7 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
   useEffect(() => {
     let cancelled = false;
     let lastSave = 0;
+    let initialFixed: Uint8Array = new Uint8Array(0);
     const host = hostRef.current;
     if (!host) return;
     (env.canvasDeps ?? loadCanvasDeps)()
@@ -93,11 +94,13 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
           onClick: (id) => store.select(id),
           onCamera: (ratio) => store.setCamera(ratio),
         }, deps);
+        const initial = store.layoutGraph(hashPosition);
+        initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
         return startLayout({
           moduleUrl: env.moduleUrl ?? "",
           workerAllowed: env.moduleUrl ? env.workerAllowed : false,
           createWorker: env.createWorker,
-          graph: store.layoutGraph(hashPosition),
+          graph: initial,
           onPositions(positions, iterations) {
             canvasRef.current?.applyPositions(positions);
             const now = Date.now();
@@ -114,7 +117,18 @@ function GraphCanvasView({ model, navigate, themeKey }: { model: GraphModel; nav
         }).then((handle) => {
           if (cancelled) { if (handle.state === "running") handle.teardown(); return; }
           if (handle.state === "cached-only") store.setLayout({ kind: "cached-only", reason: handle.reason });
-          else { layoutRef.current = handle; store.setLayout({ kind: "running", iterations: 0 }); }
+          else {
+            layoutRef.current = handle;
+            // Pins toggled between init and ready were only in the store; bring the worker up to date now.
+            const drift = model.nodes.flatMap((node, index) => {
+              const pinned = store.getState().pinned.has(node.id);
+              if (pinned === (initialFixed[index] === 1)) return [];
+              const live = canvasRef.current?.positionOf(node.id);
+              return [{ index, fixed: pinned, ...(live ? { position: live } : {}) }];
+            });
+            if (drift.length) handle.fix(drift);
+            store.setLayout({ kind: "running", iterations: 0 });
+          }
         });
       })
       .catch((error: unknown) => {

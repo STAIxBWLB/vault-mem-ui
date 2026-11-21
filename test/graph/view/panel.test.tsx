@@ -122,6 +122,22 @@ describe("GraphPanel", () => {
     expect(container.textContent).toContain("2 notes · 1 links");
   });
 
+  test("a pin toggled after init but before ready reaches the worker once it is ready", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    await mount({ graph });
+    const worker = FakeWorker.last!;
+    expect(worker.sent.map((m) => m.type)).toEqual(["init"]);
+    await act(async () => fake.handlers.get("clickNode")!({ node: "c" }));
+    const pin = [...container.querySelectorAll("button")].find((b) => b.textContent === "Pin")!;
+    await act(async () => pin.click());
+    expect(worker.sent.map((m) => m.type)).toEqual(["init"]); // no handle yet, nothing to send to
+    await act(async () => { worker.emit({ type: "ready" } as FromWorker); });
+    await flush();
+    const c = fake.attrs.get("c")!;
+    expect(worker.sent.at(-1)).toEqual({ type: "fix", nodes: [{ index: 2, fixed: true, position: [c.x as number, c.y as number] }] });
+  });
+
   test("pinning while the layout runs tells the worker, with the node's current position", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });

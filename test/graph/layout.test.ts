@@ -227,6 +227,21 @@ describe("pinning in a live layout", () => {
     p.send({ type: "fix", nodes: [{ index: 0, fixed: true }] });
     expect(p.out.at(-1)).toEqual({ type: "state", state: "paused" });
   });
+
+  it("releasing a pin after the iteration cap grants a fresh budget instead of one more iteration", () => {
+    const w = fakeScope();
+    w.send({ type: "init", graph: ring(30), settings: inferLayoutSettings(30), batchMs: 1_000_000, maxIterations: 5, convergedMovement: 0, convergedStreak: 1_000 });
+    w.send({ type: "fix", nodes: [{ index: 0, fixed: true }] });
+    while (w.pending()) w.runOne();
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+    const capped = [...w.out].reverse().find((m) => m.type === "positions");
+    expect(capped && capped.type === "positions" ? capped.iterations : -1).toBe(5);
+    w.send({ type: "fix", nodes: [{ index: 0, fixed: false }] });
+    while (w.pending()) w.runOne();
+    const after = [...w.out].reverse().find((m) => m.type === "positions");
+    expect(after && after.type === "positions" ? after.iterations : -1).toBe(10);
+    expect(w.out.at(-1)).toEqual({ type: "state", state: "done" });
+  });
 });
 
 describe("startLayout with a real module worker", () => {
