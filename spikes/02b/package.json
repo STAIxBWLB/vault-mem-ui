@@ -1,0 +1,16 @@
+{
+  "name": "spike-2b-layout-host",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle": "bun build panel.js --target browser --format esm --outfile bundle.js",
+    "measure": "bun run bundle && bun measure.ts",
+    "measure:quick": "SPIKE_CASES=persistent-10k-30k,worker-norender-10k-30k SPIKE_RUNS=1 SPIKE_ITERATIONS=20 bun run measure"
+  },
+  "dependencies": {
+    "graphology": "0.26.0",
+    "graphology-layout-forceatlas2": "0.10.1",
+    "playwright": "1.65.1",
+    "sigma": "3.0.3"
+  }
+}
