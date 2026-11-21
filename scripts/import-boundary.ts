@@ -5,8 +5,8 @@ const PANEL_ASSETS = new Set(["../../dist/panel.js", "../../dist/panel.css"]);
 
 /**
  * The filesystem exception is a read of exactly those two paths, so the check verifies the call rather than trusting
- * the file name: `readFileSync` name-imported from `node:fs`, called with a fixed asset path (a string literal, or
- * `new URL(<literal>, import.meta.url)`) and the `"utf8"` encoding. The binding may only appear as that call's callee:
+ * the file name: `readFileSync` name-imported from `node:fs`, called with a fixed asset URL
+ * (`new URL(<literal>, import.meta.url)`) and the `"utf8"` encoding. The binding may only appear as that call's callee:
  * an alias, or a reference passed on, would carry the read out from under the path check. Another `node:fs` member, a
  * variable path, a write or a dynamic import is a violation in that file like it would be anywhere else.
  */
@@ -15,15 +15,24 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
   const local = new Set<string>();
   const at = (node: ts.Node) => `${filename}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`;
   const fixedPath = (node: ts.Expression): string | undefined => {
-    if (ts.isStringLiteral(node)) return node.text;
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "URL") {
       const [target, base] = node.arguments ?? [];
-      if (!target || !base || !ts.isStringLiteral(target)) return undefined;
+      if (node.arguments?.length !== 2 || !target || !base || !ts.isStringLiteral(target)) return undefined;
       const fromModule = ts.isPropertyAccessExpression(base) && base.name.text === "url" && ts.isMetaProperty(base.expression);
       return fromModule ? target.text : undefined;
     }
     return undefined;
   };
+  // ES module imports are hoisted, so collect the binding before checking any use, regardless of source order.
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    const named = statement.importClause?.namedBindings;
+    if (named && ts.isNamedImports(named)) {
+      for (const element of named.elements) {
+        if (!element.propertyName && element.name.text === "readFileSync") local.add(element.name.text);
+      }
+    }
+  }
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       const clause = node.importClause;

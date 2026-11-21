@@ -36,9 +36,12 @@ test("boundary catches prohibited access", () => {
 const reader = "src/plugin/assets.ts";
 const allows = [
   'import { readFileSync } from "node:fs";\nconst js = readFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8");',
-  'import { readFileSync } from "node:fs";\nconst css = readFileSync("../../dist/panel.css", "utf8");',
+  'const css = readFileSync(new URL("../../dist/panel.css", import.meta.url), "utf8");\nimport { readFileSync } from "node:fs";',
 ];
 const refuses: [string, string][] = [
+  ['readFileSync(vaultPath, "utf8"); import { readFileSync } from "node:fs";', "a variable read before its hoisted import"],
+  ['const read = readFileSync; read(vaultPath, "utf8"); import { readFileSync } from "node:fs";', "an alias before its hoisted import"],
+  ['import { readFileSync } from "node:fs"; readFileSync("../../dist/panel.js", "utf8");', "a working-directory-relative asset path"],
   ['import { writeFileSync } from "node:fs";\nwriteFileSync(vaultPath, data)', "a write through node:fs"],
   ['import { readFileSync, writeFileSync } from "node:fs";\nconst js = readFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8");\nwriteFileSync("notes/a.md", "x")', "readFileSync smuggled in with a write"],
   ['import fs from "node:fs";\nfs.readFileSync("../../dist/panel.js", "utf8")', "a default import"],
