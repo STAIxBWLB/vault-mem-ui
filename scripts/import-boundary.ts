@@ -9,6 +9,21 @@ const PANEL_ASSETS = new Set(["../../dist/panel.js", "../../dist/panel.css"]);
  */
 const GLOBAL_NAMES = new Set(["global", "globalThis", "self", "window"]);
 
+/**
+ * The names a module loader answers to, refused wherever one is written. A name is refused, not a call shape, so
+ * `require("node:fs")`, `(0, require)(...)`, `require.call(...)`, `process.binding("fs")`, `process.getBuiltinModule`,
+ * `const g = process.getBuiltinModule`, `const { getBuiltinModule } = process`, `{ "getBuiltinModule": g } = process`
+ * and an import of `createRequire` are refused by the same rule: each spells the token.
+ */
+const LOADER_NAMES = new Set(["require", "createRequire", "getBuiltinModule", "binding"]);
+
+/**
+ * The names the panel asset reader may not spell either: `defineProperty`, `defineProperties`, `assign` and `Reflect`
+ * write a property without naming a binding, and a `URL` token may replace the constructor its two fixed asset paths
+ * are built on.
+ */
+const READER_NAMES = new Set(["defineProperty", "defineProperties", "Reflect", "assign", "URL"]);
+
 /** The expression without the parentheses around it: `(globalThis)` is still `globalThis`. */
 function peel(node: ts.Expression): ts.Expression {
   let current = node;
@@ -16,33 +31,40 @@ function peel(node: ts.Expression): ts.Expression {
   return current;
 }
 
-/** A member named either way: `owner.name` and `owner["name"]` reach the same property. */
-function memberName(expression: ts.Expression): { owner: ts.Expression; name: string } | undefined {
-  const node = peel(expression);
-  if (ts.isPropertyAccessExpression(node)) return { owner: peel(node.expression), name: node.name.text };
-  if (ts.isElementAccessExpression(node) && node.argumentExpression && ts.isStringLiteral(node.argumentExpression)) {
-    return { owner: peel(node.expression), name: node.argumentExpression.text };
-  }
+/**
+ * The text of a token that spells a name. A comment and JSX text are not tokens of these kinds, so prose may name a
+ * loader; an identifier, a private name, a string and a template without substitutions may not.
+ */
+function nameToken(node: ts.Node): string | undefined {
+  // A private name carries its `#` in the node's text, while the name it spells is what follows it.
+  if (ts.isPrivateIdentifier(node)) return node.text.slice(1);
+  if (ts.isIdentifier(node)) return node.text;
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
   return undefined;
 }
 
-/** The global object by any of its names; `globalThis.globalThis` and `globalThis.self` reach the same object. */
+/** How a refusal names the token: the name as it was written, or the string it was written as. */
+function tokenForm(node: ts.Node): string {
+  if (ts.isPrivateIdentifier(node)) return node.text;
+  const text = nameToken(node) ?? "";
+  return ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node) ? `the ${JSON.stringify(text)} string` : text;
+}
+
+/** The loader this node names, if it names one. */
+function loaderName(node: ts.Node): string | undefined {
+  const text = nameToken(node);
+  return text !== undefined && LOADER_NAMES.has(text) ? tokenForm(node) : undefined;
+}
+
+/** The global object by any of its names; `globalThis.self` and `window.window` reach the same object. */
 function globalObject(expression: ts.Expression): boolean {
   const node = peel(expression);
   if (ts.isIdentifier(node)) return GLOBAL_NAMES.has(node.text);
-  const member = memberName(node);
-  return !!member && GLOBAL_NAMES.has(member.name) && globalObject(member.owner);
+  if (ts.isPropertyAccessExpression(node)) return GLOBAL_NAMES.has(node.name.text) && globalObject(node.expression);
+  return false;
 }
 
-/** `process` (or `module`) itself, and the same property read off the global object. */
-function globalMember(expression: ts.Expression, name: string): boolean {
-  const node = peel(expression);
-  if (ts.isIdentifier(node)) return node.text === name;
-  const member = memberName(node);
-  return !!member && member.name === name && globalObject(member.owner);
-}
-
-/** A key the check can read: `owner["name"]` and `{ ["name"]: ... }` name the same property as `owner.name`. */
+/** A key the check can read: `owner["name"]` names the same property as `owner.name`. */
 function literalKey(expression: ts.Expression | undefined): string | undefined {
   if (!expression) return undefined;
   const node = peel(expression);
@@ -50,181 +72,34 @@ function literalKey(expression: ts.Expression | undefined): string | undefined {
   return undefined;
 }
 
-/** The key of an element access or of a computed property name, when it is written out. */
-function propertyKey(node: ts.Node): string | undefined {
-  if (ts.isElementAccessExpression(node)) return literalKey(node.argumentExpression);
-  if (ts.isComputedPropertyName(node)) return literalKey(node.expression);
-  return undefined;
+/**
+ * A member whose key the check cannot read. `globalThis[key]` may be the global URL and `process[key]` may be
+ * `process.getBuiltinModule`, so on those objects a key that is not written out is refused instead of assumed harmless.
+ */
+function unreadableMemberKey(node: ts.Node): string | undefined {
+  if (!ts.isElementAccessExpression(node)) return undefined;
+  if (literalKey(node.argumentExpression) !== undefined) return undefined;
+  const owner = peel(node.expression);
+  if (ts.isIdentifier(owner) && (owner.text === "process" || owner.text === "module")) return owner.text;
+  return globalObject(owner) ? "the global object" : undefined;
 }
 
 /**
- * A key written as a string literal: `{ "name": value }` and, in a pattern, `{ "name": local } = source`. The key names
- * the property while the node holding it is a string, so neither the identifier rule nor the computed-key rule sees it.
+ * An `import(...)` call. Every loader form is refused by its own name, so this is the load that still needs its
+ * specifier checked: it spells no loader token.
  */
-function literalNameKey(node: ts.Node): string | undefined {
-  if (!ts.isStringLiteral(node) && !ts.isNoSubstitutionTemplateLiteral(node)) return undefined;
-  const parent = node.parent;
-  if (ts.isPropertyAssignment(parent) && parent.name === node) return node.text;
-  // In a pattern the string is `propertyName`; `name` is the local binding it lands in.
-  if (ts.isBindingElement(parent) && parent.propertyName === node) return node.text;
-  return undefined;
-}
-
-/**
- * A name written as a property key: `owner.name`, `{ name: value }`, and a destructuring `{ name }` or `{ name: local }`.
- * A destructuring pattern is where an alias of a loader is introduced (`const { getBuiltinModule } = process`), so a key
- * has to be recognised in a pattern as well as in an access.
- */
-function propertyName(node: ts.Node): string | undefined {
-  if (!ts.isIdentifier(node)) return undefined;
-  const parent = node.parent;
-  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return node.text;
-  if ((ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) && parent.name === node) return node.text;
-  if (ts.isBindingElement(parent)) {
-    if (parent.propertyName === node) return node.text;
-    // `{ name }` is `{ name: name }` in an object pattern; an array pattern's elements name no property.
-    if (!parent.propertyName && parent.name === node && ts.isObjectBindingPattern(parent.parent)) return node.text;
-  }
-  return undefined;
-}
-
-/**
- * The key a node writes, however it is written: `owner.name`, `owner["name"]`, `{ name: ... }`, `{ "name": ... }`,
- * `{ ["name"]: ... }`, and the destructuring form of each. One rule reads every spelling, which is what keeps a name
- * from being refused in one shape and allowed in the next.
- */
-function propertyKeyName(node: ts.Node): string | undefined {
-  return propertyKey(node) ?? literalNameKey(node) ?? propertyName(node);
-}
-
-/** The names a module loader answers to on its own, whichever way the reference is written. */
-const LOADER_IDENTIFIERS = new Set(["require", "createRequire"]);
-/** The names a property may carry: `process.getBuiltinModule`, `process.binding`, `module.require`, `require.resolve`. */
-const LOADER_PROPERTIES = new Set(["require", "getBuiltinModule", "binding", "createRequire"]);
-/** The writers that reach a property without naming a binding; `assign` writes a whole properties object at once. */
-const REFLECTIVE_NAMES = new Set(["defineProperty", "defineProperties", "assign", "Reflect"]);
-
-/**
- * A reference to a module loader, not only a call to one. This is the rule that closes the class: `(0, require)(...)`,
- * `require.call(...)`, `require.apply(...)`, `process.binding("fs")` and `const g = process.getBuiltinModule` all name
- * the loader itself, so each is refused by name instead of by the shape of the call around it, and a destructuring
- * `const { getBuiltinModule } = process` names it just as much. Runtime code under src/ names none of these (the
- * boundary test scans every source file), and `require` and `createRequire` are refused as bare identifiers as well,
- * because an import binding or an alias is the same name.
- */
-function loaderReference(node: ts.Node): string | undefined {
-  const key = propertyKeyName(node);
-  if (key !== undefined && LOADER_PROPERTIES.has(key)) return `the ${key} property`;
-  return ts.isIdentifier(node) && LOADER_IDENTIFIERS.has(node.text) ? node.text : undefined;
-}
-
-/**
- * A reflective writer by name: `Object.defineProperty`, `Object.defineProperties`, `Object.assign` and `Reflect` reach a
- * property without naming a binding, so `Object.defineProperty.call(null, globalThis, "URL", ...)`, `Object.assign` with
- * a properties object this check cannot read, `const { defineProperty } = Object` and an alias of any of them are
- * refused by the reference rather than by the shape of the call.
- */
-function reflectiveReference(node: ts.Node): string | undefined {
-  const key = propertyKeyName(node);
-  if (key !== undefined && REFLECTIVE_NAMES.has(key)) return key === "Reflect" ? "Reflect" : `the ${key} property`;
-  if (key === undefined && ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
-  return undefined;
-}
-
-/**
- * Whether a call is made through a loader's own name, counting a factory: `createRequire(...)(...)` names `createRequire`
- * inside its callee. Such a load is refused by the name, so its specifier needs no second message.
- */
-function loadsByLoaderName(node: ts.CallExpression): boolean {
-  let callee: ts.Expression = peel(node.expression);
-  while (ts.isCallExpression(callee)) callee = peel(callee.expression);
-  return loaderReference(callee) !== undefined;
-}
-
-/**
- * A call that loads a module without an import declaration: `import(...)`, `require(...)`,
- * `process.getBuiltinModule(...)`, `import.meta.require(...)`, `module.require(...)` and `createRequire(...)(...)`.
- * Each hands back the module object, so each is checked against the same list as a static import; `form` is how the
- * message names the construct. A member may be written with a string key, and `process` and `module` may be read off the
- * global object, because `process["getBuiltinModule"]` and `globalThis.process.getBuiltinModule` are that same function.
- */
-function moduleLoadCall(node: ts.Node): { call: ts.CallExpression; form: string } | undefined {
+function dynamicImport(node: ts.Node): ts.CallExpression | undefined {
   if (!ts.isCallExpression(node)) return undefined;
-  const callee = peel(node.expression);
-  if (callee.kind === ts.SyntaxKind.ImportKeyword) return { call: node, form: "import" };
-  if (ts.isIdentifier(callee) && callee.text === "require") return { call: node, form: "require" };
-  // `createRequire(...)` hands back that same require function, so the call holding it as callee is itself a load.
-  if (ts.isCallExpression(callee)) {
-    const factory = peel(callee.expression);
-    const name = memberName(factory)?.name ?? (ts.isIdentifier(factory) ? factory.text : undefined);
-    return name === "createRequire" ? { call: node, form: "createRequire(...)" } : undefined;
-  }
-  const member = memberName(callee);
-  if (!member) return undefined;
-  if (member.name === "getBuiltinModule" && globalMember(member.owner, "process")) {
-    return { call: node, form: "process.getBuiltinModule" };
-  }
-  if (member.name === "require") {
-    if (ts.isMetaProperty(member.owner) && member.owner.keywordToken === ts.SyntaxKind.ImportKeyword) {
-      return { call: node, form: "import.meta.require" };
-    }
-    if (globalMember(member.owner, "module")) return { call: node, form: "module.require" };
-  }
-  return undefined;
-}
-
-const GLOBAL_ASSIGNMENTS = new Set([
-  ts.SyntaxKind.EqualsToken,
-  ts.SyntaxKind.BarBarEqualsToken,
-  ts.SyntaxKind.AmpersandAmpersandEqualsToken,
-  ts.SyntaxKind.QuestionQuestionEqualsToken,
-]);
-
-/**
- * A write into the global object at a key the check cannot read. A literal or template `"URL"` key is refused wherever
- * it appears, and a reflective writer is refused by name, so what is left here is `globalThis[key] = ...`, whose key
- * may be that same URL. A destructuring target writes through each of its parts, and a loop target is written on every
- * iteration without an assignment of its own, so both are walked to the same write.
- */
-function reflectiveGlobalWrite(node: ts.Node): string | undefined {
-  const throughTarget = (left: ts.Expression): string | undefined => {
-    const target = peel(left);
-    if (ts.isArrayLiteralExpression(target)) {
-      for (const element of target.elements) {
-        if (ts.isOmittedExpression(element) || ts.isSpreadElement(element)) continue;
-        const written = throughTarget(element);
-        if (written) return written;
-      }
-      return undefined;
-    }
-    if (ts.isObjectLiteralExpression(target)) {
-      for (const property of target.properties) {
-        if (ts.isSpreadAssignment(property)) continue;
-        const written = ts.isPropertyAssignment(property) ? throughTarget(property.initializer)
-          : ts.isShorthandPropertyAssignment(property) ? throughTarget(property.name)
-          : undefined;
-        if (written) return written;
-      }
-      return undefined;
-    }
-    if (!ts.isElementAccessExpression(target) || !globalObject(target.expression)) return undefined;
-    // A key the check can read is refused by its own rule, which applies to every object, not only the global one.
-    if (literalKey(target.argumentExpression) !== undefined) return undefined;
-    return "a write to a computed global key";
-  };
-  if (ts.isBinaryExpression(node) && GLOBAL_ASSIGNMENTS.has(node.operatorToken.kind)) return throughTarget(node.left);
-  if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
-    return throughTarget(node.initializer);
-  }
-  return undefined;
+  return peel(node.expression).kind === ts.SyntaxKind.ImportKeyword ? node : undefined;
 }
 
 /**
  * The filesystem exception is a read of exactly those two paths, so the check verifies the call rather than trusting
  * the file name: `readFileSync` name-imported from `node:fs`, called with a fixed asset URL
  * (`new URL(<literal>, import.meta.url)`) and the `"utf8"` encoding. The binding may only appear as that call's callee:
- * an alias, or a reference passed on, would carry the read out from under the path check. Another `node:fs` member, a
- * variable path, a write or a dynamic import is a violation in that file like it would be anywhere else.
+ * an alias, or a reference passed on, would carry the read out from under the path check. Every other name the reader
+ * would need to write through is refused here by its token, and a `new URL(<literal>, import.meta.url)` callee is the
+ * one place a `URL` is allowed to stand.
  */
 export function assetReadProblems(source: ts.SourceFile, filename: string): string[] {
   const problems: string[] = [];
@@ -268,35 +143,28 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
         local.add(element.name.text);
       }
     }
-    // Only the global URL constructor at a new-expression site is allowed here. A local declaration,
-    // parameter, import or other reference named URL could redirect a supposedly fixed asset read.
-    if (ts.isIdentifier(node) && node.text === "URL" &&
-        !(ts.isNewExpression(node.parent) && node.parent.expression === node)) {
-      problems.push(`${at(node)}: URL must be the global constructor and may not be rebound`);
-    }
-    // A `"URL"` key names the property without naming a binding, wherever it is written: `globalThis["URL"]`,
-    // `(0, globalThis)["URL"]`, a template key, an object's computed key, a quoted key (`{ "URL": u } = globalThis`)
-    // and a destructuring target all land here. A key written as a plain name needs no rule of its own: the identifier
-    // rule above refuses that same `URL` wherever it appears.
-    const urlKey = propertyKey(node) ?? literalNameKey(node);
-    if (urlKey === "URL") {
-      problems.push(`${at(node)}: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound`);
-    }
-    // A reflective writer reaches the property without a key this check can read, so it is refused by name rather
-    // than by the shape of the call: `Object.defineProperty`, `.call` on it, `Reflect.set` and an alias of either.
-    const reflective = reflectiveReference(node);
-    if (reflective) {
-      problems.push(`${at(node)}: ${reflective} may not redefine the global URL; URL must be the global constructor and may not be rebound`);
-    }
-    // The same rebinding without an identifier or a readable key: a key the check cannot read names no property, so
-    // the rules above cannot see it.
-    const globalWrite = reflectiveGlobalWrite(node);
-    if (globalWrite) {
-      problems.push(`${at(node)}: ${globalWrite}; URL must be the global constructor and may not be rebound`);
-    }
-    // A dynamic import, require or builtin-module load would reach every member of the module without naming one.
-    if (moduleLoadCall(node)) {
+    // A dynamic import reaches every member of a module without naming one.
+    if (dynamicImport(node)) {
       problems.push(`${at(node)}: the panel asset reader may only name-import readFileSync`);
+    }
+    // A writer or the URL constructor by name, in any spelling: `Object.defineProperty`, `Object["defineProperty"]`,
+    // `const { defineProperty } = Object`, `{ "defineProperty": d } = Object`, `Reflect.set`, `const r = Reflect`, an
+    // alias of `Object.assign`, `globalThis["URL"]`, a template key and `{ "URL": 1 }` all spell the token.
+    const named = nameToken(node);
+    if (named !== undefined && READER_NAMES.has(named)) {
+      const newUrlCallee = named === "URL" && ts.isIdentifier(node) &&
+        ts.isNewExpression(node.parent) && node.parent.expression === node;
+      if (!newUrlCallee) {
+        // Only the global URL constructor at a new-expression site is allowed here, because a local declaration,
+        // parameter, import or other reference named URL could redirect a supposedly fixed asset read.
+        problems.push(`${at(node)}: ${tokenForm(node)} is forbidden in the panel asset reader; the reader may only name readFileSync, its two dist asset paths and the global URL constructor`);
+      }
+    }
+    // The same rebinding without a name to refuse: a key the check cannot read names no property, so the rule above
+    // cannot see it.
+    const unreadable = unreadableMemberKey(node);
+    if (unreadable) {
+      problems.push(`${at(node)}: a computed key on ${unreadable}; the panel asset reader may only use keys it can read`);
     }
     // The binding is usable only as the callee of one of those calls: an alias, a `Function.prototype` helper, or a
     // reference handed to something else would carry the read out from under the path check.
@@ -324,9 +192,13 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
 }
 
 /**
- * Reject direct filesystem access, non-public vault-mem imports and module-loader references in source files.
+ * Reject direct filesystem access, non-public vault-mem imports and module-loader names in source files.
  *
  * Every message names the file and line, the form that was refused, and the next step.
+ *
+ * A name built at runtime is out of reach of a syntactic check: `process["get" + "BuiltinModule"]`, a template with
+ * substitutions and a key held in a variable spell no token, and refusing them would mean evaluating the source. The
+ * same goes for a shape that names no loader at all but loads one, which only a runtime guard could see.
  */
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -351,18 +223,18 @@ export function boundaryViolations(source: string, filename: string): string[] {
   const forbidden = new Set(["file", "write", "spawn", "spawnSync", "$"]);
   const visit = (node: ts.Node): void => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) checkSpecifier(node.moduleSpecifier.text, node.moduleSpecifier);
-    // The loader by name, whatever the call around it looks like: `(0, require)(...)`, `require.call(...)`,
-    // `process.binding("fs")` and an alias all name it, so the class is closed here rather than call shape by call shape.
-    const loader = loaderReference(node);
+    // A loader name, in whatever spelling the source reaches it: `(0, require)(...)`, `require.call(...)`,
+    // `process.binding("fs")`, `const g = process.getBuiltinModule`, `{ "getBuiltinModule": g } = process` and an
+    // alias are one token each, so the class closes on the name instead of on the shape of the call around it.
+    const loader = loaderName(node);
     if (loader) reject(node, loader);
-    // A module load hands back the same module object as an import, whichever form reaches it, so each is held to the
-    // same list; a specifier the check cannot read is refused like any other. A call made through a refused loader name
-    // is already refused there, and the line says it once.
-    const load = loader || (ts.isCallExpression(node) && loadsByLoaderName(node)) ? undefined : moduleLoadCall(node);
+    // A dynamic import hands back the same module object as a static one, so it is held to the same list, and a
+    // specifier the check cannot read is refused like any other.
+    const load = dynamicImport(node);
     if (load) {
-      const arg = load.call.arguments[0];
-      if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, arg, `${load.form}(${JSON.stringify(arg.text)})`);
-      else reject(arg ?? load.call, "nonliteral module loading");
+      const arg = load.arguments[0];
+      if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, arg, `import(${JSON.stringify(arg.text)})`);
+      else reject(arg ?? load, "nonliteral module loading");
     }
     if (ts.isIdentifier(node) && node.text === "Bun") {
       const parent = node.parent;

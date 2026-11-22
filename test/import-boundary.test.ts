@@ -86,16 +86,23 @@ test("boundary catches prohibited access", () => {
 });
 
 // Every refusal says where it is, which form was refused, and what to do instead: file and line, the loader name or
-// the `URL` key, and the provider route.
+// the `URL` key, and the provider route. A name written as a string is the same token, so the message says which string.
 test("a refusal names the file, the line, the form and the next step", () => {
   expect(boundaryViolations('const fs = process.binding("fs");', "src/client/probe.ts")).toEqual([
-    "src/client/probe.ts:1: the binding property is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+    "src/client/probe.ts:1: binding is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
   ]);
   expect(boundaryViolations('const a = 1;\nconst fs = require("node:fs");', "src/client/probe.ts")).toEqual([
     "src/client/probe.ts:2: require is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
   ]);
+  expect(boundaryViolations('const { "getBuiltinModule": g } = process;\ng("node:fs");', "src/client/probe.ts")).toEqual([
+    'src/client/probe.ts:1: the "getBuiltinModule" string is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)',
+  ]);
+  // A private name is refused by the name it spells and reported as it was written, with its `#`.
+  expect(boundaryViolations('class Probe { #require() { return 1 } }', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:1: #require is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+  ]);
   expect(boundaryViolations('import { readFileSync } from "node:fs";\nglobalThis["URL"] = class {};', reader)).toEqual([
-    "src/plugin/assets.ts:2: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound",
+    'src/plugin/assets.ts:2: the "URL" string is forbidden in the panel asset reader; the reader may only name readFileSync, its two dist asset paths and the global URL constructor',
   ]);
 });
 
@@ -184,6 +191,15 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nconst { "assign": a } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted assign introduced by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst { "Reflect": R } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted Reflect introduced by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst { "URL": U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted URL key read by destructuring"],
+  // The same two classes in the shapes codex's rounds named: the other writer that takes a whole properties object, a
+  // quoted key inside a pattern, and a quoted URL key in an object literal rather than in a write.
+  ['import { readFileSync } from "node:fs";\nObject.defineProperties(globalThis, props);\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperties write of a properties object"],
+  ['import { readFileSync } from "node:fs";\nconst { "defineProperties": dp } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted defineProperties introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst spec = { "URL": 1 };\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted URL key in an object literal"],
+  // A key the check cannot read on the two objects that hand out loaders, refused for the same reason a global one is.
+  ['import { readFileSync } from "node:fs";\nconst loader = process[loaderKey];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on process"],
+  ['import { readFileSync } from "node:fs";\nconst loader = module[loaderKey];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on module"],
+  ['import { readFileSync } from "node:fs";\nglobalThis.self[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on the global object through globalThis.self"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
@@ -207,8 +223,18 @@ test("a global key the check cannot read is described as computed", () => {
     'import { readFileSync } from "node:fs";\nglobalThis[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")',
     reader,
   );
-  expect(found.filter((problem) => problem.includes("to a computed global key"))).not.toEqual([]);
-  expect(found.filter((problem) => problem.includes("string-keyed"))).toEqual([]);
+  expect(found).toEqual([
+    "src/plugin/assets.ts:2: a computed key on the global object; the panel asset reader may only use keys it can read",
+  ]);
+});
+
+// The check refuses a name it can read, so a name assembled at runtime is outside it. This test marks the limit rather
+// than leaving it implied: the concatenated key and the template with a substitution spell no single banned token.
+test("a name built at runtime is an allowed limitation", () => {
+  for (const source of [
+    'const g = process["get" + "BuiltinModule"];\ng("node:fs");',
+    'const g = process[`getBuiltin${"Module"}`];\ng("node:fs");',
+  ]) expect(boundaryViolations(source, "example.ts")).toEqual([]);
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {
