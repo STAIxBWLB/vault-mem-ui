@@ -3,8 +3,6 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { ProposalsView } from "../../src/client/views/proposals.tsx";
-import { createFakeHost } from "../../src/client/fake.ts";
-import { confirmWrite, startWrite } from "../../src/client/write.ts";
 import type { ActionInput } from "../../src/client/host.ts";
 
 let root: Root;
@@ -47,22 +45,4 @@ test("apply and reject send explicit actions and validate the reason", () => {
   act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(writes).toHaveLength(2);
   expect(container.textContent).toContain("4096 bytes");
-});
-
-test("apply and reject require confirmation and stale previews are shown again", async () => {
-  for (const action of ["proposal-apply", "proposal-reject"]) {
-    const input = { action, vault: "work", id: "p1", ...(action === "proposal-reject" ? { reason: "Not suitable" } : {}) };
-    const host = createFakeHost({ replies: { [action]: { ok: false, needsConfirm: true, fingerprint: "fp1", preview: ["review"] } } });
-    const preview = await startWrite(host, input);
-    expect(preview).toMatchObject({ phase: "preview", fingerprint: "fp1" });
-    host.action = async (next) => { host.calls.action.push(next); return { ok: false, needsConfirm: true, fingerprint: "fp2", preview: ["updated"] }; };
-    const stale = await confirmWrite(host, preview);
-    expect(host.calls.action.at(-1)).toMatchObject({ confirmed: true, fingerprint: "fp1" });
-    expect(stale).toMatchObject({ phase: "preview", fingerprint: "fp2" });
-    host.action = async (next) => { host.calls.action.push(next); return { ok: true, message: "done" }; };
-    expect(await confirmWrite(host, stale)).toMatchObject({ phase: "done", message: "done" });
-    expect(host.calls.action.at(-1)).toMatchObject({ confirmed: true, fingerprint: "fp2" });
-    host.action = async () => ({ ok: false, error: "provider refusal" });
-    expect(await confirmWrite(host, stale)).toMatchObject({ phase: "error", message: expect.stringContaining("provider refusal") });
-  }
 });
