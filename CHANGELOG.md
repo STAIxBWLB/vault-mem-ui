@@ -13,7 +13,7 @@ Requires `@staix/vault-mem` 0.13.1.
 ### Added
 
 - The `acon` console plugin that keeps `@staix/vault-mem/ui-plugin` as its provider and serves this package's own panel bundle.
-- The client panels for vmem's overview, search, note, promote, lint, log, settings, proposals, assertions and history, the note body rendered as Markdown, and the graph view with its local view, shortest path, pins and level of detail.
+- The client panels for vmem's overview, search, note, promote, lint, log, settings, proposals, assertions and history, the note body rendered as Markdown, and the graph view with its search, filters, legend, inspector and insights, local view, shortest path, pins and level of detail.
 - The graph's decision chains mode, ordering notes along the provider's `supersedes` and `superseded_by` relations.
 - Typed link authoring from the graph inspector through the provider's two-step `link` action.
 - Offline export of the filtered graph as one self-contained HTML file.
