@@ -45,7 +45,7 @@ The vault it serves is the one vmem resolves for this process, not `$AGENTHUB_HO
 - API: `POST /api/snapshot` and `POST /api/action` relay to the provider. A snapshot names one of the manifest's panels, plus `inbox` and `search` when the plugin advertises those capabilities; `after` is how many items the page already has, as a whole number 0 or more.
 - Confirmation in standalone mode belongs to the page: the server relays `confirmed` and `fingerprint` exactly as the page sent them, and never adds either. It cannot tell what the browser displayed, so a caller holding the session cookie can confirm without any preview having been rendered. What protects the write is vmem's own check: it recomputes the preview from the current vault and writes only when the fingerprint still matches, so a stale or invented fingerprint is answered with the fresh preview instead of a write. Reaching the API at all takes the one-time sign-in link's cookie, a same-origin `Origin` and the loopback Host, which bounds who can call but does not prove that a person looked. `acon` does this differently (its server mints a confirm token) because the console renders the preview itself.
 - A provider failure is logged to the terminal and answered with the reason and the next step.
-- The page runs the existing client panels; the settings panel is not implemented yet.
+- The page runs the existing client panels; settings, proposals, assertions and history are not implemented yet.
 
 ## License
 

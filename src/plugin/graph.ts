@@ -7,6 +7,7 @@
  */
 
 import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console/contract";
+import { isPanelId } from "../client/prefs.ts";
 
 export const GRAPH_PANEL = { id: "graph", title: "Graph", order: 7 } as const;
 
@@ -17,6 +18,11 @@ export const GRAPH_UNAVAILABLE =
 export function withGraphPanel(manifest: ConsolePanelManifest): ConsolePanelManifest {
   if (manifest.panels.some((p) => p.id === GRAPH_PANEL.id)) return manifest;
   return { ...manifest, panels: [...manifest.panels, { ...GRAPH_PANEL }] };
+}
+
+/** Declare only panels rendered by this bundle in either host. */
+export function implementedPanelManifest(manifest: ConsolePanelManifest): ConsolePanelManifest {
+  return withGraphPanel({ ...manifest, panels: manifest.panels.filter((panel) => isPanelId(panel.id)) });
 }
 
 function isUnknownGraphPanel(reply: Record<string, unknown>): boolean {
