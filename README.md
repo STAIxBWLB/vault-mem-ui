@@ -60,7 +60,17 @@ A release is one tag on a green `main`: the tag runs the checks again, packs onc
 
 1. Release-prep PR: bump `version` in `package.json` and move the `## [Unreleased]` entries under `## [x.y.z] - YYYY-MM-DD`. Until that dated section exists the tag is refused, because `Unreleased` alone is not a release.
 2. Merge it, then on a clean, up-to-date `main`: `bun run release:tag --push`. Without `--push` the annotated tag stays local. The script refuses a tree that is not clean, a `main` behind `origin/main`, a tag that already exists, a version that does not increase over the existing release tags, and a missing dated section, and each refusal names the next step.
-3. `.github/workflows/release.yml` re-checks the tag against the package version and the changelog, requires the commit to be on `main` with a green `Check` run for it, runs `bun run check`, shows the `npm pack` file list, and stages the tarball with a SHA-256 manifest.
+3. `.github/workflows/release.yml` re-checks the tag against the package version and the changelog, requires the commit to be on `main` with a green `Check` run for it, runs `bun run check`, shows the `npm pack` file list, stages the tarball with a SHA-256 manifest, and installs that tarball in an empty consumer project (`bun scripts/package-smoke.ts`) so the packaged plugin imports and `vmem-ui --help` runs before anything is published.
+
+### The first publish
+
+`@staix/vault-mem-ui` has never been published (`npm view @staix/vault-mem-ui` answers 404), and npm's trusted publishing is configured on a package that already exists, which the flow here needs: the publish job has no npm token and reaches the registry only through OIDC. So the first release is three steps, all of them a person's:
+
+1. Publish once by hand: `npm publish --access public --provenance=false`. `--provenance=false` overrides `publishConfig.provenance`, which asks for an OIDC identity a local shell does not have.
+2. Attach the trusted publisher, the same configuration as the list below: `npm trust github @staix/vault-mem-ui --file release.yml --repository STAIxBWLB/vault-mem-ui --environment npm-production --allow-publish` (npm 12 has this command; `npm trust --help` lists its flags).
+3. Set `NPM_PUBLISH_ENABLED=true`, then release the next version through the tag flow above, which publishes with provenance from then on. npm's docs say an unvalidated trusted-publisher configuration expires, so the first tag release should follow step 2 rather than wait.
+
+Unverified from this repository, and none of it attempted here: that the manual first publish succeeds, that `npm trust` accepts a package before its first publish rather than requiring one that exists, and how long an unvalidated configuration lasts. Everything else in this section names what was run, with its result, in the release PR.
 
 The `Publish approved artifact with npm OIDC` job runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true`; `Publish the GitHub release` follows it. Settings a person configures once, none of which this repository sets up:
 
