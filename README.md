@@ -6,7 +6,7 @@ Web UI for [vmem](https://github.com/STAIxBWLB/vault-mem): a standalone browser 
 
 Not published yet. The repository contains the package scaffold, checks, standalone host command, client panels and `acon` console plugin. The design is tracked in this repository's issues.
 
-The graph panel (Sigma canvas, ForceAtlas2 in the panel's own module worker, local view, shortest path, pins and level of detail above 30,000 edges) is in place and shows "Graph not available" until the vmem provider sends a graph snapshot (vault-mem #266). In the static multi-node host the panel shows cached positions only, because the layout worker cannot start there.
+The graph panel loads the vmem provider's paged graph snapshot and offers a Sigma canvas, ForceAtlas2 in the panel's own module worker, local view, shortest path, pins and level of detail above 30,000 edges. Older providers without graph snapshots show "Graph not available". In the static multi-node host the panel shows cached positions only, because the layout worker cannot start there.
 
 For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run check`.
 
@@ -28,7 +28,7 @@ The `acon` plugin in `src/plugin` keeps `@staix/vault-mem/ui-plugin`'s provider 
 
 ## Graph controls
 
-The graph view provides search, domain, type, relation and community filters, a legend, a selected-note inspector and read-only insights. Level of detail uses the full graph edge count even when filters are active. Possible-link analysis is limited to graphs with at most 30,000 edges; narrow larger graphs with filters. The provider graph snapshot is still pending (vault-mem #266).
+The graph view provides search, domain, type, relation and community filters, a legend, a selected-note inspector and read-only insights. Level of detail uses the full graph edge count even when filters are active. Possible-link analysis is limited to graphs with at most 30,000 edges; narrow larger graphs with filters.
 
 ## Scope
 

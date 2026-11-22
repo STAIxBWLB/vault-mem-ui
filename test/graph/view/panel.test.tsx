@@ -108,6 +108,14 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("provider errors are shown unchanged with a first-page retry", async () => {
+    const navigations: unknown[] = [];
+    const error = "graph page is invalid or expired; restart from the first page";
+    await mount({ error }, (panel, params) => navigations.push({ panel, params }));
+    expect(container.textContent).toContain(error);
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "First page")!.click(); });
+    expect(navigations).toEqual([{ panel: "graph", params: {} }]);
+  });
   test("community swatches retain their colours after toggling off and on", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });

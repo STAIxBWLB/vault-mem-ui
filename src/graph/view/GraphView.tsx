@@ -1,8 +1,7 @@
 /**
  * Graph panel: Sigma canvas, layout worker, toolbar and keyboard. Adapted from STAIxBWLB/maru@b33341df
  * src/components/graph/GraphView.tsx (toolbar, local view, path, pins, layout status), reduced to what the
- * vmem provider can supply. Data arrives as `reply.graph` in GraphInput shape; until vault-mem #266 defines the
- * provider's graph snapshot this panel states that the graph is not available instead of guessing a wire format.
+ * vmem provider can supply. The client store assembles provider pages into `reply.graph` before rendering.
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -79,12 +78,13 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
   if (content !== seen.content) setSeen({ content, generation: seen.generation + 1 });
   const generation = content !== seen.content ? seen.generation + 1 : seen.generation;
   const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [generation]); // keyed on content, not identity
+  if (typeof reply.error === "string") return <><Notice tone="err">{reply.error}</Notice>{/restart from the first page/i.test(reply.error) && <button type="button" className="vmem-button" onClick={() => navigate("graph", vaultParam(params))}>First page</button>}</>;
   if (!model) {
     const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <GraphCanvasView key={generation} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} />;
+  return <>{Number((reply.graphStats as { placeholdersOmitted?: number } | undefined)?.placeholdersOmitted) > 0 && <Notice tone="warn">Some unresolved links were omitted by the provider because the graph reached its size limit.</Notice>}<GraphCanvasView key={generation} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} /></>;
 }
 
 function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {

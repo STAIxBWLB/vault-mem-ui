@@ -3,6 +3,7 @@
 import type { ActionInput, Host, SnapshotReply, Theme } from "./host.ts";
 import { browserStorage, readPrefs, writePrefs, type Prefs, type StorageLike, type ThemePref } from "./prefs.ts";
 import { confirmWrite, startWrite, type WriteState } from "./write.ts";
+import { assembleGraphPages } from "../graph/view/graph-snapshot.ts";
 
 export interface ClientState {
   panel: string;
@@ -64,6 +65,15 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
   // is still current, so a reply cannot reopen a write on a panel or view the person already left, or after Cancel.
   let ticket = 0;
   let hostWritePending = false;
+  const acceptSnapshot = async (reply: SnapshotReply, seq: number, panel: string, params: Record<string, string>) => {
+    if (seq !== asked) return;
+    const stats = state.reply?.graphStats as { cursor?: unknown; vault?: unknown; revision?: unknown } | undefined;
+    if (panel === "graph" && state.reply?.graph && reply.schema === 1 && typeof reply.cursor === "number" && reply.cursor === stats?.cursor && reply.vault === stats.vault && reply.revision === stats.revision) return;
+    const assembled = panel === "graph" ? await assembleGraphPages((input) => host.snapshot(input), reply, params, () => seq === asked) : reply;
+    if (seq !== asked) return;
+    if (assembled.changed === false && state.reply) return;
+    set({ reply: assembled, phase: "ready", error: undefined });
+  };
   const own = (write: WriteState) => {
     ticket += 1;
     set({ write });
@@ -94,11 +104,11 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // Every request gets a number, and only the newest one may land: a slow reply must not overwrite the panel
       // the person already moved to, nor the same panel asked with different parameters.
       const seq = ++asked;
-      const input = { panel: state.panel, ...state.params };
+      const stats = state.reply?.graphStats as { cursor?: unknown } | undefined;
+      const input = { panel: state.panel, ...state.params, ...(state.panel === "graph" && state.reply?.graph && typeof stats?.cursor === "number" ? { after: stats.cursor } : {}) };
       try {
         const reply = await host.snapshot(input);
-        if (seq !== asked) return;
-        set({ reply, phase: "ready", error: undefined });
+        await acceptSnapshot(reply, seq, input.panel, state.params);
       } catch (error) {
         if (seq !== asked) return;
         const cause = error instanceof Error ? error.message : String(error ?? "");
@@ -141,7 +151,12 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
     },
     start() {
       const stops: (() => void)[] = [];
-      if (host.subscribe) stops.push(host.subscribe((reply) => set({ reply, phase: "ready", error: undefined })));
+      if (host.subscribe) stops.push(host.subscribe((reply) => {
+        const seq = ++asked, panel = state.panel, params = state.params;
+        void acceptSnapshot(reply, seq, panel, params).catch((error) => {
+          if (seq === asked) set({ phase: "error", error: error instanceof Error ? error.message : String(error) });
+        });
+      }));
       else {
         // A background tab must not keep a standalone server alive indefinitely.
         const page = typeof document !== "undefined" && typeof document.addEventListener === "function" && typeof document.removeEventListener === "function" ? document : undefined;
