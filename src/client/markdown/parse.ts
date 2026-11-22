@@ -35,7 +35,7 @@ export type Block =
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
+const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
 const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const RULE = /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
 const QUOTE = /^ {0,3}>[ ]?/;
@@ -111,7 +111,10 @@ function parseBlocks(lines: string[], depth: number): Block[] {
 
     const atx = ATX.exec(line);
     if (atx) {
-      const heading = (atx[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+      let heading = (atx[2] ?? "").trim();
+      let end = heading.length;
+      while (end > 0 && heading[end - 1] === "#") end--;
+      if (end > 0 && /[ \t]/.test(heading[end - 1]!)) heading = heading.slice(0, end).trimEnd();
       blocks.push({ kind: "heading", depth: atx[1]!.length, children: parseInline(heading) });
       at += 1;
       continue;
@@ -301,6 +304,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
   if (depth >= MAX_INLINE_DEPTH) return text ? [{ kind: "text", text }] : [];
   const out: Inline[] = [];
   const delimiters = delimiterIndex(text);
+  const codeRuns = text.includes("`") ? codeRunIndex(text) : null;
   // Every `[` is paired with its closing `]` in this one pass, so a candidate link start is a lookup rather than a scan
   // to the end of the text: a note of many `[` and a single `]` re-read the same tail from each opening, which took 1.9 s
   // at 48 KB under V8 with the old guard (that guard only helped when no `]` existed at all).
@@ -341,7 +345,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
       continue;
     }
     if (char === "`") {
-      const span = codeSpan(text, at);
+      const span = codeSpan(text, at, codeRuns!);
       if (span) {
         flush();
         out.push(span.node);
@@ -399,21 +403,29 @@ interface Span {
   end: number;
 }
 
-function codeSpan(text: string, at: number): Span | null {
-  let size = 0;
-  while (text[at + size] === "`") size += 1;
-  let cursor = at + size;
-  while (cursor < text.length) {
-    if (text[cursor] !== "`") {
-      cursor += 1;
-      continue;
+/** Each possible opener, including a suffix of an unmatched run, looks up the next full run of equal size. */
+function codeRunIndex(text: string): { ends: Int32Array; closers: Int32Array } {
+  const ends = new Int32Array(text.length), closers = new Int32Array(text.length);
+  closers.fill(-1);
+  const next = new Map<number, number>();
+  let at = text.length - 1;
+  while (at >= 0) {
+    if (text[at] !== "`") { at--; continue; }
+    const end = at + 1;
+    while (at >= 0 && text[at] === "`") at--;
+    const start = at + 1;
+    for (let i = start; i < end; i++) {
+      ends[i] = end;
+      closers[i] = next.get(end - i) ?? -1;
     }
-    let run = 0;
-    while (text[cursor + run] === "`") run += 1;
-    if (run === size) return { node: { kind: "code", text: text.slice(at + size, cursor).replace(/\n/g, " ") }, end: cursor + run };
-    cursor += run;
+    next.set(end - start, start);
   }
-  return null;
+  return { ends, closers };
+}
+
+function codeSpan(text: string, at: number, runs: { ends: Int32Array; closers: Int32Array }): Span | null {
+  const end = runs.ends[at]!, close = runs.closers[at]!;
+  return close < 0 ? null : { node: { kind: "code", text: text.slice(end, close).replace(/\n/g, " ") }, end: close + end - at };
 }
 
 /** `[[target]]`, `[[target|alias]]`, `[[target#heading]]` and the `![[…]]` embed, read the way vmem reads them. */
