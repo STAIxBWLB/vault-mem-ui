@@ -39,8 +39,11 @@ function unsafeOwner(node: ts.Node, names: ReadonlySet<string>): boolean {
     if (!names.has(node.text) || (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) return false;
     if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
       let container: ts.Node = node.parent.parent;
-      while (ts.isObjectLiteralExpression(container) || ts.isArrayLiteralExpression(container) || ts.isPropertyAssignment(container) || ts.isParenthesizedExpression(container)) container = container.parent;
-      if (!ts.isBinaryExpression(container) || container.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+      let target: ts.Node = container;
+      while (ts.isObjectLiteralExpression(container) || ts.isArrayLiteralExpression(container) || ts.isPropertyAssignment(container) || ts.isParenthesizedExpression(container)) { target = container; container = container.parent; }
+      const assignment = ts.isBinaryExpression(container) && container.operatorToken.kind === ts.SyntaxKind.EqualsToken && container.left === target;
+      const loop = (ts.isForOfStatement(container) || ts.isForInStatement(container)) && container.initializer === target;
+      if (!assignment && !loop) return false;
     }
   } else if (ts.isPropertyAccessExpression(node)) {
     if (!globalObject(node.expression) || !names.has(node.name.text)) return false;
