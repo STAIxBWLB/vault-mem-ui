@@ -96,7 +96,7 @@ test("a refusal names the file, the line, the form and the next step", () => {
   ]);
   expect(boundaryViolations('const { "getBuiltinModule": g } = process;\ng("node:fs");', "src/client/probe.ts")).toEqual([
     'src/client/probe.ts:1: the "getBuiltinModule" string is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)',
-    "src/client/probe.ts:1: process used without a direct literal-keyed member is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+    "src/client/probe.ts:1: loader owner cannot be passed or aliased; use a direct literal-keyed member such as process.env",
   ]);
   // A private name is refused by the name it spells and reported as it was written, with its `#`.
   expect(boundaryViolations('class Probe { #require() { return 1 } }', "src/client/probe.ts")).toEqual([
@@ -226,7 +226,7 @@ test("a global key the check cannot read is described as computed", () => {
   );
   expect(found).toEqual([
     "src/plugin/assets.ts:2: a computed key on the global object; write the key as a literal",
-    "src/plugin/assets.ts:2: globalThis cannot be passed or aliased in the panel asset reader; use a direct member with a literal key",
+    "src/plugin/assets.ts:2: global owner cannot be passed or aliased in the panel asset reader; use a direct literal-keyed member",
   ]);
 });
 
@@ -236,7 +236,17 @@ test("a name built at runtime is an allowed limitation", () => {
   for (const source of [
     'const g = other["get" + "BuiltinModule"];\ng("node:fs");',
     'const g = other[`getBuiltin${"Module"}`];\ng("node:fs");',
+    'const g = globalThis; g.process[k];',
   ]) expect(boundaryViolations(source, "example.ts")).toEqual([]);
+});
+
+test("literal global owner keys and global destructuring cannot hide owner access", () => {
+  for (const source of ['const p = globalThis["process"]; p["getBuiltin" + "Module"]("node:fs")', 'const p = self[`process`]', 'const { "process": p } = globalThis', '({ process: p } = globalThis)', 'Reflect.get(globalThis["process"], k)', 'globalThis["module"]', 'const { ["pro" + "cess"]: p } = globalThis']) {
+    expect({ source, refused: boundaryViolations(source, "src/client/probe.ts").length > 0 }).toEqual({ source, refused: true });
+  }
+  for (const source of ['const g = globalThis["self"]; g["U" + "RL"] = class {}', 'const { "self": g } = globalThis']) expect(boundaryViolations(source, reader)).not.toEqual([]);
+  expect(boundaryViolations('console.log("process")', "src/client/probe.ts")).toEqual([]);
+  expect(boundaryViolations('globalThis["process"].env', "src/client/probe.ts")).toEqual([]);
 });
 
 test("unknown computed keys on known global and loader objects are refused throughout src", () => {
@@ -262,6 +272,9 @@ test("asset exports, quoted Bun aliases and import-equals are refused", () => {
   for (const source of ['globalThis["Bun"].write(p, x)', 'const { "Bun": B } = globalThis', 'globalThis[`Bun`].write(p, x)', 'import fs = require("node:fs")']) expect(boundaryViolations(source, "src/client/probe.ts")).not.toEqual([]);
   expect(boundaryViolations('const binding = 1', "src/client/probe.ts").join(" ")).toContain("rename the token");
   expect(boundaryViolations('process[key]', "src/client/probe.ts").join(" ")).toContain("write the key as a literal");
+  expect(boundaryViolations('const { "Bun": B } = globalThis', "src/client/probe.ts").join(" ")).toContain('the "Bun" string is forbidden; rename it');
+  expect(boundaryViolations('const p = process', "src/client/probe.ts").join(" ")).toContain("such as process.env");
+  expect(boundaryViolations('import fs = require("node:fs")', "src/client/probe.ts").join(" ")).toContain("use an import declaration");
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {

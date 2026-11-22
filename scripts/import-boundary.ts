@@ -35,17 +35,39 @@ function peel(node: ts.Expression): ts.Expression {
 
 /** Known owners must not be passed or aliased: only a direct, readable member access is allowed. */
 function unsafeOwner(node: ts.Node, names: ReadonlySet<string>): boolean {
-  if (!ts.isIdentifier(node) || !names.has(node.text)) return false;
-  const parent = node.parent;
-  const owner = ts.isPropertyAccessExpression(parent) && parent.name === node && globalObject(parent.expression) ? parent : node;
-  if (owner === node && ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
-  const use = owner.parent;
-  if (ts.isPropertyAccessExpression(use) && use.expression === owner) return false;
-  if (ts.isElementAccessExpression(use) && use.expression === owner && literalKey(use.argumentExpression) !== undefined) return false;
+  if (ts.isIdentifier(node)) {
+    if (!names.has(node.text) || (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) return false;
+  } else if (ts.isPropertyAccessExpression(node)) {
+    if (!globalObject(node.expression) || !names.has(node.name.text)) return false;
+  } else if (ts.isElementAccessExpression(node)) {
+    if (!globalObject(node.expression) || !names.has(literalKey(node.argumentExpression) ?? "")) return false;
+  } else return false;
+  const use = node.parent;
+  if (ts.isPropertyAccessExpression(use) && use.expression === node) return false;
+  if (ts.isElementAccessExpression(use) && use.expression === node && literalKey(use.argumentExpression) !== undefined) return false;
   return true;
 }
 
 const LOADER_OWNERS = new Set(["process", "module"]);
+
+/** Keys read directly from a global object by destructuring, including computed unreadable keys. */
+function globalPatternKeys(node: ts.Node, names: ReadonlySet<string>): ts.Node[] {
+  let pattern: ts.Node | undefined;
+  if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && globalObject(node.initializer)) pattern = node.name;
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isObjectLiteralExpression(peel(node.left)) && globalObject(node.right)) pattern = peel(node.left);
+  if (!pattern) return [];
+  const members = ts.isObjectBindingPattern(pattern) ? pattern.elements : ts.isObjectLiteralExpression(pattern) ? pattern.properties : [];
+  const refused: ts.Node[] = [];
+  for (const member of members) {
+    const key = ts.isBindingElement(member) ? member.propertyName ?? member.name : ts.isPropertyAssignment(member) || ts.isShorthandPropertyAssignment(member) ? member.name : undefined;
+    if (!key) continue;
+    if (ts.isComputedPropertyName(key)) {
+      const value = literalKey(key.expression);
+      if (value === undefined || names.has(value)) refused.push(key);
+    } else if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && names.has(key.text)) refused.push(key);
+  }
+  return refused;
+}
 
 /**
  * The text of a token that spells a name. A comment and JSX text are not tokens of these kinds, so prose may name a
@@ -150,7 +172,8 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
     if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
       problems.push(`${at(node)}: the panel asset reader cannot re-export modules; remove the export and use its fixed asset reads`);
     }
-    if (unsafeOwner(node, GLOBAL_NAMES)) problems.push(`${at(node)}: ${tokenForm(node)} cannot be passed or aliased in the panel asset reader; use a direct member with a literal key`);
+    if (unsafeOwner(node, GLOBAL_NAMES)) problems.push(`${at(node)}: global owner cannot be passed or aliased in the panel asset reader; use a direct literal-keyed member`);
+    for (const key of globalPatternKeys(node, GLOBAL_NAMES)) problems.push(`${at(key)}: global owner cannot be destructured in the panel asset reader; use a direct literal-keyed member`);
     if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       if (node.moduleSpecifier.text !== "node:fs") {
         problems.push(`${at(node)}: the panel asset reader must import readFileSync from node:fs`);
@@ -225,6 +248,7 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
  * Computed keys on known global or loader objects are refused, but a name built at runtime on another object is out of
  * reach of a syntactic check. `eval`, `new Function`, `module.constructor._load` and `import.meta` rewrites are outside
  * this check; a shape that names no loader at all but loads one needs a runtime guard.
+ * Aliasing the global object outside the asset reader is also outside this check.
  */
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -249,13 +273,14 @@ export function boundaryViolations(source: string, filename: string): string[] {
   const forbidden = new Set(["file", "write", "spawn", "spawnSync", "$"]);
   const visit = (node: ts.Node): void => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) checkSpecifier(node.moduleSpecifier.text, node.moduleSpecifier);
-    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) reject(node, "import-equals module loading");
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) violations.push(`${at(node)}: import-equals module loading is forbidden; use an import declaration`);
     // A loader name, in whatever spelling the source reaches it: `(0, require)(...)`, `require.call(...)`,
     // `process.binding("fs")`, `const g = process.getBuiltinModule`, `{ "getBuiltinModule": g } = process` and an
     // alias are one token each, so the class closes on the name instead of on the shape of the call around it.
     const loader = loaderName(node);
     if (loader) violations.push(`${at(node)}: ${loader} is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)`);
-    if (unsafeOwner(node, LOADER_OWNERS)) reject(node, `${tokenForm(node)} used without a direct literal-keyed member`);
+    if (unsafeOwner(node, LOADER_OWNERS)) violations.push(`${at(node)}: loader owner cannot be passed or aliased; use a direct literal-keyed member such as process.env`);
+    for (const key of globalPatternKeys(node, LOADER_OWNERS)) violations.push(`${at(key)}: global owner key cannot be destructured; use a direct literal-keyed member such as process.env`);
     const unreadable = !assetReader && unreadableMemberKey(node);
     if (unreadable) violations.push(`${at(node)}: a computed key on ${unreadable} is forbidden; write the key as a literal`);
     // A dynamic import hands back the same module object as a static one, so it is held to the same list, and a
@@ -266,7 +291,7 @@ export function boundaryViolations(source: string, filename: string): string[] {
       if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, arg, `import(${JSON.stringify(arg.text)})`);
       else reject(arg ?? load, "nonliteral module loading");
     }
-    if (nameToken(node) === "Bun" && !ts.isIdentifier(node)) reject(node, `${tokenForm(node)} Bun alias or destructuring`);
+    if (nameToken(node) === "Bun" && !ts.isIdentifier(node)) violations.push(`${at(node)}: ${tokenForm(node)} is forbidden; rename it`);
     if (ts.isIdentifier(node) && node.text === "Bun") {
       const parent = node.parent;
       if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
