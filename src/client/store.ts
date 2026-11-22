@@ -106,6 +106,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       set({ prefs: writePrefs({ ...state.prefs, theme }, storage), theme: resolveTheme(theme, host.theme()) });
     },
     setWrite(write) {
+      if (state.write.phase === "confirming") return;
       // Closing or replacing the dialog also supersedes whatever is still being asked for.
       own(write);
     },
@@ -123,6 +124,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       const current = state.write;
       if (current.phase !== "preview") return;
       const mine = ++ticket;
+      set({ write: { phase: "confirming", verb: current.verb } });
       const result = await confirmWrite(host, current);
       if (mine !== ticket) return;
       set({ write: result });

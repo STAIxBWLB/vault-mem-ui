@@ -256,6 +256,22 @@ describe("start", () => {
 });
 
 describe("writes", () => {
+  test("a second confirmation and cancellation are ignored while the first is in flight", async () => {
+    const { host, pending } = deferredAction();
+    const store = createStore(host);
+    const writing = store.beginWrite({ action: "delete", path: "notes/a.md" });
+    pending[0]!.resolve({ ok: false, needsConfirm: true, fingerprint: "fp", verb: "Delete note" });
+    await writing;
+    const first = store.confirmWriteNow();
+    const second = store.confirmWriteNow();
+    store.setWrite({ phase: "idle" });
+    expect(store.getState().write).toEqual({ phase: "confirming", verb: "Delete note" });
+    expect(host.calls.action).toHaveLength(2);
+    pending[1]!.resolve({ ok: true, message: "Delete note: done" });
+    await Promise.all([first, second]);
+    expect(store.getState().write).toEqual({ phase: "done", message: "Delete note: done" });
+  });
+
   test("beginWrite shows the preview, confirmWriteNow re-sends the fingerprint, and the panel reloads", async () => {
     const answers: ActionResult[] = [
       { ok: false, needsConfirm: true, fingerprint: "sha256:abc", verb: "Delete note", preview: ["delete notes/a.md"], changes: [], warnings: [] },

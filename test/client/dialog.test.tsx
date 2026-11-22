@@ -65,6 +65,13 @@ const press = (key: string, shiftKey = false) => {
 };
 
 describe("WriteDialog focus", () => {
+  test("a write in progress disables confirmation and cancellation", () => {
+    mount({ phase: "confirming", verb: "Delete note" });
+    expect(dialog()?.textContent).toContain("Applying changes...");
+    expect([...dialog()!.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+    expect(focused()).toBe(dialog());
+  });
+
   test("opening moves the focus into the dialog, so the panel behind it cannot be typed into", () => {
     const opener = outside();
     mount(preview);

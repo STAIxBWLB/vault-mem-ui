@@ -10,6 +10,7 @@ import type { ActionInput, ActionResult, Change, Host } from "./host.ts";
 
 export type WriteState =
   | { phase: "idle" }
+  | { phase: "confirming"; verb: string }
   | {
       phase: "preview";
       input: ActionInput;
