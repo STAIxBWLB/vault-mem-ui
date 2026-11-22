@@ -1,7 +1,7 @@
 /**
  * The two read-only panels: assertions (the journal's answer plus every coverage gap) and history (a note's
  * revisions and the changes between two of them). The replies below are the shapes the provider answers with
- * (`AssertionsSnapshot` and `HistorySnapshot`); the content is synthetic.
+ * (`AssertionAnswerSet` and `HistorySnapshot`); the content is synthetic.
  */
 
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
@@ -17,12 +17,11 @@ beforeAll(() => { GlobalRegistrator.register(); (globalThis as { IS_REACT_ACT_EN
 afterEach(() => { act(() => root?.unmount()); container?.remove(); });
 afterAll(async () => { await GlobalRegistrator.unregister(); });
 
-const mount = (view: React.ReactElement, navigations: unknown[] = []): unknown[] => {
+const mount = (view: React.ReactElement): void => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   act(() => root.render(view));
-  return navigations;
 };
 
 const navigate = (navigations: unknown[]) => (panel: string, params?: Record<string, string>) => navigations.push({ panel, params });
@@ -35,14 +34,27 @@ const click = (element: HTMLElement) => act(() => element.click());
 
 const assertion = {
   id: "a1", rev: 2, op: "revise", subject: "notes/a.md", relation: "status", value: "current", kind: "state",
-  hash: "h1", recordedAt: "2026-01-02T03:04:05Z", reason: "review", subjectNote: { path: "notes/a.md", status: "present" },
+  from: "2025-12-01", to: "2026-01-01", hash: "h1", recordedAt: "2026-01-02T03:04:05Z", reason: "review",
+  subjectNote: { path: "notes/a.md", status: "present" },
+};
+const held = {
+  id: "a2", rev: 1, op: "assert", subject: "notes/c.md", relation: "campus", value: "jeju", kind: "state",
+  held_on: "2025-06-01", hash: "h2", recordedAt: "2026-01-02T04:00:00Z",
+  subjectNote: { path: "notes/c.md", status: "present" },
+};
+const event = {
+  id: "a3", rev: 1, op: "assert", subject: "notes/e.md", relation: "reviewed", value: "true", kind: "event",
+  on: "2025-11-05", hash: "h3", recordedAt: "2026-01-02T04:30:00Z",
+  subjectNote: { path: "notes/e.md", status: "present" },
 };
 const withheld = {
-  id: "a2", rev: 1, op: "assert", subject: "notes/b.md", relation: "owner", value: { withheld: "secret" },
-  hash: "h2", recordedAt: "2026-01-02T05:00:00Z", subjectNote: { path: "notes/b.md", status: "present" },
+  id: "a4", rev: 1, op: "assert", subject: "notes/b.md", relation: "owner", value: { withheld: "secret" },
+  hash: "h4", recordedAt: "2026-01-02T05:00:00Z", subjectNote: { path: "notes/b.md", status: "present" },
 };
+/** A purged entry the provider strips down to its frame: no subject, relation or value left to name it by. */
+const purged = { id: "a5", rev: 3, op: "retract", purged: true, hash: "h5", recordedAt: "2026-01-02T06:30:00Z" };
 const missing = {
-  id: "a3", rev: 1, op: "retract", subject: "notes/gone.md", relation: "status", hash: "h3",
+  id: "a6", rev: 1, op: "retract", subject: "notes/gone.md", relation: "status", hash: "h6",
   recordedAt: "2026-01-02T06:00:00Z", subjectNote: { path: "notes/gone.md", status: "missing" },
 };
 const assertionsReply = {
@@ -50,7 +62,7 @@ const assertionsReply = {
   result: {
     schemaVersion: 1, basis: "assertion_journal", vault: "work", at: "2026-01-02T07:00:00Z",
     asOf: { requested: "2026-01-01", cutoff: "2026-01-01T00:00:00Z", cutoffInclusive: false },
-    pin: [], coverage: {}, items: [assertion, withheld, missing], truncated: true, continuation: "c1",
+    pin: [], coverage: {}, items: [assertion, held, event, withheld, purged, missing], truncated: true, continuation: "c1",
   },
   warnings: [
     { tone: "err", message: "1 journal entry is untrusted and left out (seg#3: bad hash); run `vmem assertions work --history --json`" },
@@ -61,12 +73,16 @@ const assertionsReply = {
 
 test("assertions: the journal's answer, each coverage gap as its own notice, and the links a row may offer", () => {
   const navigations: unknown[] = [];
-  mount(<AssertionsView reply={assertionsReply} params={{ vault: "work" }} navigate={navigate(navigations)} beginWrite={() => {}} />, navigations);
+  mount(<AssertionsView reply={assertionsReply} params={{ vault: "work" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
   expect(container.textContent).toContain("notes/a.md status current");
-  expect(container.textContent).toContain("revise · rev 2 · state · 2026-01-02 03:04 · review");
-  expect(container.textContent).toContain("3 assertions · as of 2026-01-01 00:00 (exclusive)");
+  expect(rows("Assertions")[0]!.textContent).toContain("revise · rev 2 · state · from 2025-12-01 · to 2026-01-01 · 2026-01-02 03:04 · review");
+  expect(container.textContent).toContain("6 assertions · as of 2026-01-01 00:00 (exclusive)");
   expect(container.textContent).toContain("withheld (secret)");
   expect(container.textContent).toContain("note missing");
+
+  // An ended state says when it held, and an event says the day it happened: neither reads as current.
+  expect(rows("Assertions")[1]!.textContent).toContain("state · held 2025-06-01 · 2026-01-02 04:00");
+  expect(rows("Assertions")[2]!.textContent).toContain("event · on 2025-11-05 · 2026-01-02 04:30");
 
   // The three coverage tones: err is an alert, warn and information are status text.
   const notices = [...container.querySelectorAll(".vmem-notice")];
@@ -75,13 +91,17 @@ test("assertions: the journal's answer, each coverage gap as its own notice, and
   expect(notices[1]!.getAttribute("role")).toBe("status");
   expect(notices[2]!.textContent).toContain("purged payload is not shown");
 
+  // A purged row keeps its id as its name, and its payload gap is stated.
+  expect(rows("Assertions")[4]!.querySelector(".vmem-row-title")?.textContent).toBe("a5");
+  expect(rows("Assertions")[4]!.querySelector(".vmem-chip")?.textContent).toBe("payload unavailable");
+
   // A present note is reachable; a missing one is shown but opens nothing.
-  expect(rows("Assertions")).toHaveLength(3);
+  expect(rows("Assertions")).toHaveLength(6);
   click(rows("Assertions")[0]!.querySelector("button.vmem-row") as HTMLElement);
   expect(navigations.at(-1)).toEqual({ panel: "note", params: { path: "notes/a.md", vault: "work" } });
-  click(rows("Assertions")[2]!.querySelector("button.vmem-row") as HTMLElement);
+  click(rows("Assertions")[5]!.querySelector("button.vmem-row") as HTMLElement);
   expect(navigations).toHaveLength(1);
-  expect(rows("Assertions")[2]!.querySelector("button.vmem-row")!.getAttribute("aria-disabled")).toBe("true");
+  expect(rows("Assertions")[5]!.querySelector("button.vmem-row")!.getAttribute("aria-disabled")).toBe("true");
 
   expect(container.textContent).toContain("The provider stopped at its page limit");
   click(button("Next page")!);
@@ -90,7 +110,7 @@ test("assertions: the journal's answer, each coverage gap as its own notice, and
 
 test("assertions: a paged answer can go back to the first page, and an empty or refused one says so", () => {
   const navigations: unknown[] = [];
-  mount(<AssertionsView reply={assertionsReply} params={{ vault: "work", cursor: "c0" }} navigate={navigate(navigations)} beginWrite={() => {}} />, navigations);
+  mount(<AssertionsView reply={assertionsReply} params={{ vault: "work", cursor: "c0" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
   click(button("First page")!);
   expect(navigations.at(-1)).toEqual({ panel: "assertions", params: { vault: "work" } });
 
@@ -116,6 +136,7 @@ test("assertions: a paged answer can go back to the first page, and an empty or 
 
 const older = { revision: "aaaaaaaaaaaa1111", blob: "bbbbbbbbbbbb2222", bytes: 120, committedAt: "2026-01-02T03:04:05Z" };
 const newer = { revision: "cccccccccccc3333", blob: "dddddddddddd4444", bytes: 130, committedAt: "2026-01-03T03:04:05Z" };
+const third = { revision: "eeeeeeeeeeee5555", blob: "ffffffffffff6666", bytes: 110, committedAt: "2026-01-01T03:04:05Z" };
 const history = {
   path: "notes/a.md", revisions: [newer, older], scanned: 12, scanLimit: 500, pageLimit: 20,
   stopReason: "page_full", truncated: true, continuation: "h2", skippedSymlink: 0,
@@ -124,7 +145,7 @@ const historyReply = { vault: "work", path: "notes/a.md", history, changes: null
 
 test("history: the revisions, older ones paged, and the stop reason when the provider read only part of it", () => {
   const navigations: unknown[] = [];
-  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />, navigations);
+  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
   expect(container.textContent).toContain("notes/a.md");
   expect(rows("Revisions")).toHaveLength(2);
   expect(rows("Revisions")[0]!.textContent).toContain("Revision cccccccccccc");
@@ -145,7 +166,7 @@ test("history: the revisions, older ones paged, and the stop reason when the pro
 
 test("history: two picked revisions are sent together, and one pick alone never asks for changes", () => {
   const navigations: unknown[] = [];
-  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />, navigations);
+  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
   expect(button("Show changes")!.hasAttribute("disabled")).toBe(true);
   expect(container.textContent).toContain("From not chosen to not chosen");
 
@@ -167,21 +188,63 @@ test("history: two picked revisions are sent together, and one pick alone never 
   });
 });
 
-test("history: the provider's half-pair refusal is shown as given and the revisions stay to pick from", () => {
+test("history: a half-picked pair survives paging, so revisions on two pages can still be compared", () => {
   const navigations: unknown[] = [];
+  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
+  click(verb(rows("Revisions")[0]!, "To"));
+  click(button("Older revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", cursor: "h2", pickTo: newer.revision },
+  });
+
+  // Every navigation remounts the view, so the second page below is a fresh mount with only the params to go on.
+  act(() => root.unmount());
+  container.remove();
   mount(
     <HistoryView
-      reply={{ ...historyReply, error: "changes need both from and to commit ids; pick two revisions from the history list" }}
+      reply={{ ...historyReply, history: { ...history, revisions: [third], continuation: undefined } }}
+      params={{ path: "notes/a.md", cursor: "h2", pickTo: newer.revision }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+  expect(container.textContent).toContain("From not chosen to cccccccccccc");
+  expect(verb(rows("Revisions")[0]!, "To").getAttribute("aria-pressed")).toBe("false");
+  click(verb(rows("Revisions")[0]!, "From"));
+  click(button("Show changes")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", from: third.revision, to: newer.revision },
+  });
+  // Going back for the newest page keeps both ends of the pair.
+  click(button("Newest revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", pickFrom: third.revision, pickTo: newer.revision },
+  });
+});
+
+test("history: a refusal shows only the provider's own sentence, and a coverage gap names its reason", () => {
+  const navigations: unknown[] = [];
+  const gap = { path: "notes/a.md", revisions: [], coverage: { complete: false, reason: "this vault is not a git repository root; point the client at the vault's top level, then reload" } };
+  mount(<HistoryView reply={{ vault: "work", path: "notes/a.md", history: gap, changes: null }} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />);
+  expect(container.querySelector(".vmem-notice-warn")?.textContent).toContain("is not a git repository root");
+  expect(container.textContent).not.toContain("No history");
+
+  // A refusal answers no history at all: the alternative reads as "no commit yet", which is not what happened.
+  act(() => root.render(
+    <HistoryView
+      reply={{ vault: null, path: null, history: null, changes: null, error: "changes need both from and to commit ids; pick two revisions from the history list" }}
       params={{ path: "notes/a.md", from: older.revision }}
       navigate={navigate(navigations)}
       beginWrite={() => {}}
     />,
-    navigations,
-  );
-  expect(container.textContent).toContain("changes need both from and to commit ids; pick two revisions from the history list");
+  ));
   expect(container.querySelector(".vmem-notice-err")?.getAttribute("role")).toBe("alert");
-  expect(rows("Revisions")).toHaveLength(2);
-  expect(container.textContent).toContain("From aaaaaaaaaaaa to not chosen");
+  expect(container.textContent).toContain("changes need both from and to commit ids");
+  expect(container.querySelector('ul[aria-label="Revisions"]')).toBeNull();
+  expect(container.textContent).not.toContain("No history");
 });
 
 test("history: the changes between two revisions, paged, with deleted notes shown but not opened", () => {
@@ -203,7 +266,6 @@ test("history: the changes between two revisions, paged, with deleted notes show
       navigate={navigate(navigations)}
       beginWrite={() => {}}
     />,
-    navigations,
   );
   expect(container.textContent).toContain("4 notes changed between aaaaaaaaaaaa and cccccccccccc of 6");
   expect(rows("Changed notes").map((r) => r.textContent)).toEqual([
@@ -237,6 +299,43 @@ test("history: the changes between two revisions, paged, with deleted notes show
   });
 });
 
+test("history: paging the changes keeps the pair on screen, and a newer pick rides along instead of replacing it", () => {
+  const navigations: unknown[] = [];
+  const changes = {
+    from: older.revision, to: newer.revision,
+    changed: [{ path: "notes/a.md", status: "M", before: "1111aaaa2222", after: "3333bbbb4444" }],
+    total: 3, truncated: true, continuation: "ch2", skippedDenied: 0, skippedSymlink: 0,
+  };
+  mount(
+    <HistoryView
+      reply={{ ...historyReply, history: { ...history, revisions: [newer, older, third] }, changes }}
+      params={{ path: "notes/a.md", from: older.revision, to: newer.revision, changesCursor: "ch1" }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+  // A new pair would page a list it did not produce, and the old changesCursor must not outlive its pair.
+  click(verb(rows("Revisions")[2]!, "From"));
+  click(button("Show changes")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", from: third.revision, to: newer.revision },
+  });
+  click(button("More changes")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: third.revision, changesCursor: "ch2",
+    },
+  });
+  click(button("First page")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision, pickFrom: third.revision },
+  });
+});
+
 test("history: a pair that changes nothing, and a note the panel was not given", () => {
   const navigations: unknown[] = [];
   const changes = { from: older.revision, to: newer.revision, changed: [], total: 0, truncated: false, skippedDenied: 0, skippedSymlink: 0 };
@@ -247,7 +346,6 @@ test("history: a pair that changes nothing, and a note the panel was not given",
       navigate={navigate(navigations)}
       beginWrite={() => {}}
     />,
-    navigations,
   );
   expect(container.textContent).toContain("No changes");
   expect(container.textContent).toContain("These revisions change no notes in this vault.");
