@@ -31,8 +31,7 @@ export interface GraphLocalTarget {
 }
 
 /**
- * Internal input to the graph model. A later adapter fills it from the provider's graph snapshot
- * (STAIxBWLB/vault-mem#266); this is not that wire format and makes no claim about it.
+ * Internal input to the graph model, assembled from the provider's columnar graph snapshot pages.
  */
 export interface GraphInput {
   nodes: GraphInputNode[];

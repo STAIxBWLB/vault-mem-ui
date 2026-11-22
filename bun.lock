@@ -5,7 +5,7 @@
     "": {
       "name": "@staix/vault-mem-ui",
       "dependencies": {
-        "@staix/vault-mem": "0.12.1",
+        "@staix/vault-mem": "0.13.0",
         "graphology": "0.26.0",
         "graphology-layout-forceatlas2": "0.10.1",
         "react": "^19.2.0",
@@ -29,7 +29,7 @@
 
     "@staix/agent-mem": ["@staix/agent-mem@0.33.0", "", { "bin": { "amem": "bin/amem.js" } }, "sha512-Z6b9ie0Lu9TvTnmw9JZj8okQm54KnrxHoY7rEg6PwUfTd3LwrWKwNnuIA+LZswktXgGBO11K8GkRzCRMHFdSNQ=="],
 
-    "@staix/vault-mem": ["@staix/vault-mem@0.12.1", "", { "dependencies": { "@staix/agent-mem": ">=0.33.0 <1.0.0" }, "bin": { "vmem": "bin/vmem.js" } }, "sha512-PCHr5KlLxiA/9r81mRM8A3Px3ELJ39LSfVckZyY8Lo97E2lnwCK5Lad7scG5GEVyK4as7MgbsLTDttfxDPgyZA=="],
+    "@staix/vault-mem": ["@staix/vault-mem@0.13.0", "", { "dependencies": { "@staix/agent-mem": ">=0.33.0 <1.0.0" }, "bin": { "vmem": "bin/vmem.js" } }, "sha512-FqDZ9DkZrOoSPv2cwcRBldIr8gf4PTJOTKufvbE+zC72KovgSwZ9Q1QjhoS507Df3sS6vNAAhc0Wn77iXx0VSg=="],
 
     "@types/bun": ["@types/bun@1.4.5", "", { "dependencies": { "bun-types": "1.4.5" } }, "sha512-DpgwNI9z0L1S0gtb45QLCWgwCUcMLnsHYMJHQvpNj7erGiCGBvpggltAIeARrtobNMKMuy0UP7i56tKKgwFs/Q=="],
 
