@@ -100,6 +100,21 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("community swatches retain their colours after toggling off and on", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph: { ...graph, communities: { a: 0, b: 2 } } });
+    const swatches = () => [...container.querySelectorAll<HTMLElement>("[data-community]")].map((el) => el.style.backgroundColor);
+    const colours = swatches();
+    expect(colours).toHaveLength(2);
+    expect(colours.every(Boolean)).toBe(true);
+    const toggle = [...container.querySelectorAll("button")].find((button) => button.textContent === "Communities")!;
+    await act(async () => toggle.click());
+    expect(swatches()).toEqual([]);
+    await act(async () => toggle.click());
+    expect(swatches()).toEqual(colours);
+  });
+
   test("a provider without a graph snapshot says so with the next step", async () => {
     configureGraph({});
     await mount({});

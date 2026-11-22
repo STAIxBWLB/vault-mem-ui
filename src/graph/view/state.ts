@@ -1,8 +1,8 @@
 // Graph view state, independent of Sigma and React so it is testable on its own.
 // Rewritten for this package; behaviour follows STAIxBWLB/maru@b33341df src/components/graph/GraphView.tsx (mode,
-// focus, selection, hover, path, pins and layout status), without app state, i18n, filters or export.
+// focus, selection, hover, path, pins and layout status), without app state, i18n or export.
 
-import { deriveGraphView, type DerivedGraph } from "../derive";
+import { applyGraphSearch, deriveGraphView, type DerivedGraph } from "../derive";
 import { shortestPath } from "../insights";
 import { buildAdjacency, graphEdgeVisibilityKey, type GraphModel } from "../model";
 import { graphTopologySignature } from "../style";
@@ -24,11 +24,14 @@ export interface GraphViewState {
   mode: ViewMode;
   /** Local view centre; also the node the keyboard moves from. */
   focusId: string | null;
+  /** Fixed centre of the local view, independent of keyboard selection. */
+  localCenterId: string | null;
   localDepth: 1 | 2 | 3;
   selectedId: string | null;
   hoverId: string | null;
   /** First endpoint chosen for a shortest path, then the found path (inclusive) or null when none exists. */
   pathSourceId: string | null;
+  pathTargetId: string | null;
   path: string[] | null;
   pathMissing: boolean;
   colorByCommunity: boolean;
@@ -36,6 +39,8 @@ export interface GraphViewState {
   layout: LayoutStatus;
   cameraRatio: number;
   derived: DerivedGraph;
+  profile: GraphFilterProfile;
+  search: string;
   lod: Lod;
 }
 
@@ -58,6 +63,8 @@ export interface GraphViewStore {
   pathTo(id: string | null): void;
   togglePin(id: string): void;
   setColorByCommunity(on: boolean): void;
+  setProfile(profile: GraphFilterProfile): void;
+  setSearch(search: string): void;
   setCamera(ratio: number): void;
   setLayout(status: LayoutStatus): void;
   /** Moves the selection to the next/previous visible neighbour (keyboard). */
@@ -74,16 +81,18 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   const cacheKey = graphTopologySignature(model.nodes, model.edges);
   const cached = readLayoutCache(options.storage, cacheKey);
   const ids = new Set(model.nodes.map((n) => n.id));
-  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3) => deriveGraphView({
-    model, profile: OPEN_PROFILE, generatedPatterns: [], mode, focusNodeId: focusId,
+  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3, profile: GraphFilterProfile) => deriveGraphView({
+    model, profile, generatedPatterns: [], mode, focusNodeId: focusId,
     localDepth: depth, localDirection: "both", search: "", searchAsFilter: false,
   });
+  let analysis = derive("global", null, 2, OPEN_PROFILE);
   let state: GraphViewState = {
-    mode: "global", focusId: null, localDepth: 2, selectedId: null, hoverId: null,
-    pathSourceId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
+    mode: "global", focusId: null, localCenterId: null, localDepth: 2, selectedId: null, hoverId: null,
+    pathSourceId: null, pathTargetId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
     pinned: new Set(cached.pinned.filter((id) => ids.has(id))),
     layout: { kind: "idle" }, cameraRatio: 1,
-    derived: derive("global", null, 2),
+    profile: { ...OPEN_PROFILE }, search: "",
+    derived: analysis,
     lod: lodFor(model.edges.length, { ratio: 1, layoutRunning: false }),
   };
   let positions = cached.positions;
@@ -97,25 +106,42 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     for (const l of listeners) l();
   };
   const known = (id: string | null) => id === null || ids.has(id);
+  const visible = (id: string | null) => id === null || state.derived.visibleNodeIds.has(id);
+  // Filtering changes which nodes and edges can be acted on. A path must remain valid in the visible graph.
+  const reconcile = (derived: DerivedGraph): Partial<GraphViewState> => {
+    const has = (id: string | null) => id !== null && derived.visibleNodeIds.has(id);
+    const selectedId = has(state.selectedId) ? state.selectedId : null;
+    const hoverId = has(state.hoverId) ? state.hoverId : null;
+    const focusId = has(state.focusId) ? state.focusId : null;
+    const source = state.pathSourceId, target = state.pathTargetId;
+    if (!has(source) || (target !== null && !has(target))) {
+      return { derived, selectedId, hoverId, focusId, pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
+    }
+    const path = source && target ? shortestPath(derived.visibleModel, source, target) : null;
+    return { derived, selectedId, hoverId, focusId, pathSourceId: source, pathTargetId: target,
+      path, pathMissing: target !== null && path === null };
+  };
 
   return {
     model,
     cacheKey,
     getState: () => state,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
-    select(id) { if (known(id)) set({ selectedId: id, focusId: id ?? state.focusId }); },
-    hover(id) { if (known(id) && id !== state.hoverId) set({ hoverId: id }); },
+    select(id) { if (known(id) && visible(id)) set({ selectedId: id, focusId: id ?? state.focusId }); },
+    hover(id) { if (known(id) && visible(id) && id !== state.hoverId) set({ hoverId: id }); },
     openLocal(id, depth = state.localDepth) {
-      if (!known(id)) return;
+      if (!known(id) || !visible(id)) return;
       const mode: ViewMode = id === null ? "global" : "local";
-      set({ mode, focusId: id, localDepth: depth, selectedId: id ?? state.selectedId, derived: derive(mode, id, depth) });
+      analysis = derive(mode, id, depth, state.profile);
+      const derived = applyGraphSearch(analysis, state.search);
+      set({ ...reconcile(derived), mode, focusId: id, localCenterId: id, localDepth: depth, selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
     },
     pathTo(id) {
-      if (id === null) return set({ pathSourceId: null, path: null, pathMissing: false });
-      if (!known(id)) return;
-      if (state.pathSourceId === null || state.path) return set({ pathSourceId: id, path: null, pathMissing: false });
-      const path = shortestPath(model, state.pathSourceId, id);
-      set({ path, pathMissing: path === null });
+      if (id === null) return set({ pathSourceId: null, pathTargetId: null, path: null, pathMissing: false });
+      if (!known(id) || !visible(id)) return;
+      if (state.pathSourceId === null || state.path) return set({ pathSourceId: id, pathTargetId: null, path: null, pathMissing: false });
+      const path = shortestPath(state.derived.visibleModel, state.pathSourceId, id);
+      set({ pathTargetId: id, path, pathMissing: path === null });
     },
     togglePin(id) {
       if (!known(id)) return;
@@ -125,6 +151,13 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       writeLayoutCache(options.storage, cacheKey, { positions, pinned: [...pinned] });
     },
     setColorByCommunity(on) { set({ colorByCommunity: on && model.enriched }); },
+    setProfile(profile) {
+      analysis = derive(state.mode, state.localCenterId, state.localDepth, profile);
+      set({ profile, ...reconcile(applyGraphSearch(analysis, state.search)) });
+    },
+    setSearch(search) {
+      set({ search, ...reconcile(applyGraphSearch(analysis, search)) });
+    },
     setCamera(ratio) { if (Number.isFinite(ratio) && ratio > 0 && ratio !== state.cameraRatio) set({ cameraRatio: ratio }); },
     setLayout(layout) { set({ layout }); },
     step(direction) {

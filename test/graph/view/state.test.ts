@@ -67,6 +67,35 @@ describe("graph view store", () => {
     expect(store.getState()).toMatchObject({ selectedId: "b", focusId: "b" });
   });
 
+  test("search clears hidden selection, hover, focus and path, and retains the analysis model", () => {
+    const store = createGraphViewStore(model);
+    store.select("b");
+    store.hover("b");
+    store.pathTo("a");
+    store.pathTo("c");
+    const analysis = store.getState().derived.analysisModel;
+    store.setSearch("notes/d");
+    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: null, path: null });
+    expect(store.getState().derived.analysisModel).toBe(analysis);
+    store.select("b");
+    expect(store.getState().selectedId).toBeNull();
+  });
+
+  test("filtered paths use visible edges and profile changes clear hidden state", () => {
+    const store = createGraphViewStore(model);
+    store.select("b");
+    store.hover("b");
+    store.setProfile({ ...store.getState().profile, relations: ["related"] });
+    store.pathTo("a");
+    store.pathTo("c");
+    expect(store.getState()).toMatchObject({ path: null, pathMissing: true });
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    store.select("e");
+    store.hover("e");
+    store.setProfile({ ...store.getState().profile, showUnresolved: false });
+    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: "a" });
+  });
+
   test("local view narrows to the neighbourhood and goes back to global", () => {
     const store = createGraphViewStore(model);
     store.openLocal("a", 1);
@@ -75,6 +104,63 @@ describe("graph view store", () => {
     store.openLocal(null);
     expect(store.getState().mode).toBe("global");
     expect(store.getState().derived.visibleNodeIds.size).toBe(5);
+  });
+
+  test("local centre survives selection, profile and search changes", () => {
+    const chain = buildGraphModel({
+      nodes: ["a", "b", "c", "d", "e"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, domain: id === "a" || id === "b" ? "x" : "y" })),
+      edges: [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"]].map(([source, target]) => ({ source: source!, target: target!, relation: "related", fromFrontmatter: false })),
+    }, 0);
+    const store = createGraphViewStore(chain);
+    store.openLocal("a", 1);
+    store.select("b");
+    store.setProfile({ ...store.getState().profile });
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+    store.setSearch("zzz");
+    store.setSearch("");
+    store.setProfile({ ...store.getState().profile });
+    expect(store.getState().localCenterId).toBe("a");
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+    store.openLocal("b", 1);
+    store.select("c");
+    store.setProfile({ ...store.getState().profile, domains: ["x"] });
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+  });
+
+  test("a visible path source survives changes, and a disconnected path is reported", () => {
+    const store = createGraphViewStore(model);
+    store.pathTo("a");
+    store.setSearch("notes/c");
+    expect(store.getState().pathSourceId).toBeNull();
+    store.setSearch("");
+    store.pathTo("b");
+    store.setSearch("notes/c");
+    expect(store.getState().pathSourceId).toBe("b");
+    store.pathTo("c");
+    expect(store.getState().path).toEqual(["b", "c"]);
+    store.setSearch("");
+    expect(store.getState().path).toEqual(["b", "c"]);
+    store.setProfile({ ...store.getState().profile, relations: ["wiki_link"] });
+    expect(store.getState()).toMatchObject({ pathSourceId: "b", pathTargetId: "c", path: null, pathMissing: true });
+  });
+
+  test("path and no-path notice are recomputed when visible edges change", () => {
+    const route = buildGraphModel({
+      nodes: ["a", "b", "c", "d"].map((id) => ({ id, label: id, relPath: `notes/${id}.md` })),
+      edges: [["a", "b", "wiki_link"], ["b", "c", "wiki_link"], ["c", "d", "wiki_link"], ["a", "d", "related"]].map(([source, target, relation]) => ({ source: source!, target: target!, relation: relation!, fromFrontmatter: false })),
+    }, 0);
+    const store = createGraphViewStore(route);
+    store.setProfile({ ...store.getState().profile, relations: ["related"] });
+    store.pathTo("a"); store.pathTo("c");
+    expect(store.getState()).toMatchObject({ pathMissing: true, pathTargetId: "c" });
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    expect(store.getState()).toMatchObject({ pathMissing: false, path: ["a", "b", "c"] });
+    store.pathTo("a");
+    store.setProfile({ ...store.getState().profile, relations: ["wiki_link"] });
+    store.pathTo("d");
+    expect(store.getState().path).toEqual(["a", "b", "c", "d"]);
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    expect(store.getState().path).toEqual(["a", "d"]);
   });
 
   test("shortest path picks a source, then finds the path or reports none", () => {

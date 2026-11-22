@@ -110,11 +110,7 @@ export function mountGraphCanvas(
   let pathNodes = new Set<string>(state.path ?? []);
   let pathEdges = pathEdgeKeys(state.path);
   let neighbours = new Set<string>();
-  const adjacency = new Map<string, Set<string>>();
-  for (const e of model.edges) {
-    (adjacency.get(e.source) ?? adjacency.set(e.source, new Set()).get(e.source)!).add(e.target);
-    (adjacency.get(e.target) ?? adjacency.set(e.target, new Set()).get(e.target)!).add(e.source);
-  }
+
 
   const sigma = deps.createSigma(graph, container, {
     allowInvalidContainer: true,
@@ -182,7 +178,11 @@ export function mountGraphCanvas(
       state = next;
       pathNodes = new Set(next.path ?? []);
       pathEdges = pathEdgeKeys(next.path);
-      neighbours = next.hoverId ? (adjacency.get(next.hoverId) ?? new Set()) : new Set();
+      neighbours = new Set();
+      if (next.hoverId) for (const edge of next.derived.visibleModel.edges) {
+        if (edge.source === next.hoverId) neighbours.add(edge.target);
+        if (edge.target === next.hoverId) neighbours.add(edge.source);
+      }
       if (next.lod !== lastLod) {
         if (next.lod.labelDensity !== lastLod.labelDensity) sigma.setSetting("labelDensity", next.lod.labelDensity);
         if (next.lod.renderLabels !== lastLod.renderLabels) sigma.setSetting("renderLabels", next.lod.renderLabels);
