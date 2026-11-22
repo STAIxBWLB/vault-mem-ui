@@ -42,6 +42,70 @@ function globalMember(expression: ts.Expression, name: string): boolean {
   return !!member && member.name === name && globalObject(member.owner);
 }
 
+/** A key the check can read: `owner["name"]` and `{ ["name"]: ... }` name the same property as `owner.name`. */
+function literalKey(expression: ts.Expression | undefined): string | undefined {
+  if (!expression) return undefined;
+  const node = peel(expression);
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text;
+  return undefined;
+}
+
+/** The key of an element access or of a computed property name, when it is written out. */
+function propertyKey(node: ts.Node): string | undefined {
+  if (ts.isElementAccessExpression(node)) return literalKey(node.argumentExpression);
+  if (ts.isComputedPropertyName(node)) return literalKey(node.expression);
+  return undefined;
+}
+
+/** The names a module loader answers to on its own, whichever way the reference is written. */
+const LOADER_IDENTIFIERS = new Set(["require", "createRequire"]);
+/** The names a property may carry: `process.getBuiltinModule`, `process.binding`, `module.require`, `require.resolve`. */
+const LOADER_PROPERTIES = new Set(["require", "getBuiltinModule", "binding", "createRequire"]);
+/** The writers that reach a property without naming a binding. */
+const REFLECTIVE_PROPERTIES = new Set(["defineProperty", "defineProperties"]);
+
+/**
+ * A reference to a module loader, not only a call to one. This is the rule that closes the class: `(0, require)(...)`,
+ * `require.call(...)`, `require.apply(...)`, `process.binding("fs")` and `const g = process.getBuiltinModule` all name
+ * the loader itself, so each is refused by name instead of by the shape of the call around it. Runtime code under src/
+ * names none of these (the boundary test scans every source file), and `require` and `createRequire` are refused as bare
+ * identifiers as well, because an import binding or an alias is the same name.
+ */
+function loaderReference(node: ts.Node): string | undefined {
+  if (ts.isIdentifier(node) && LOADER_IDENTIFIERS.has(node.text)) {
+    // A property name is reported as the property it is by the branch below, so `module.require` counts once.
+    const written = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
+    if (!written) return node.text;
+  }
+  const named = ts.isPropertyAccessExpression(node) && LOADER_PROPERTIES.has(node.name.text) ? node.name.text : undefined;
+  const keyed = propertyKey(node);
+  const name = named ?? (keyed !== undefined && LOADER_PROPERTIES.has(keyed) ? keyed : undefined);
+  return name === undefined ? undefined : `the ${name} property`;
+}
+
+/**
+ * A reflective writer by name: `Object.defineProperty`, `Object.defineProperties` and `Reflect` reach a property without
+ * naming a binding, so `Object.defineProperty.call(null, globalThis, "URL", ...)` and an alias of either are refused by
+ * the reference rather than by the shape of the call.
+ */
+function reflectiveReference(node: ts.Node): string | undefined {
+  if (ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
+  const named = ts.isPropertyAccessExpression(node) && REFLECTIVE_PROPERTIES.has(node.name.text) ? node.name.text : undefined;
+  const keyed = propertyKey(node);
+  const name = named ?? (keyed !== undefined && REFLECTIVE_PROPERTIES.has(keyed) ? keyed : undefined);
+  return name === undefined ? undefined : `the ${name} property`;
+}
+
+/**
+ * Whether a call is made through a loader's own name, counting a factory: `createRequire(...)(...)` names `createRequire`
+ * inside its callee. Such a load is refused by the name, so its specifier needs no second message.
+ */
+function loadsByLoaderName(node: ts.CallExpression): boolean {
+  let callee: ts.Expression = peel(node.expression);
+  while (ts.isCallExpression(callee)) callee = peel(callee.expression);
+  return loaderReference(callee) !== undefined;
+}
+
 /**
  * A call that loads a module without an import declaration: `import(...)`, `require(...)`,
  * `process.getBuiltinModule(...)`, `import.meta.require(...)`, `module.require(...)` and `createRequire(...)(...)`.
@@ -82,48 +146,42 @@ const GLOBAL_ASSIGNMENTS = new Set([
 ]);
 
 /**
- * A write that replaces the global `URL` without naming an identifier: `globalThis["URL"] = ...` names the property by
- * a string, `[globalThis["URL"]] = ...` reaches it through a destructuring target, and `Object.defineProperty` /
- * `Reflect.set` never mention the binding at all, so the identifier rule below sees none of them. The global object
- * answers to `self` and `window` as well, and to `globalThis.globalThis`. A literal `URL` key is the one this file is
- * protected against; a key the check cannot read is refused too, because an unknown key may be that one.
+ * A write into the global object at a key the check cannot read. A literal or template `"URL"` key is refused wherever
+ * it appears, and a reflective writer is refused by name, so what is left here is `globalThis[key] = ...`, whose key
+ * may be that same URL. A destructuring target writes through each of its parts, and a loop target is written on every
+ * iteration without an assignment of its own, so both are walked to the same write.
  */
 function reflectiveGlobalWrite(node: ts.Node): string | undefined {
-  // A write is named by its key: a literal one is read here, and one the check cannot read is refused.
-  const cause = (manner: string, key: ts.Expression | undefined): string | undefined => {
-    const write = manner ? `a ${manner} write` : "a write";
-    if (key && ts.isStringLiteral(key)) return key.text === "URL" ? `${write} to the global URL` : undefined;
-    return `${write} to a computed global key`;
-  };
-  // A destructuring assignment writes through each of its targets, so `[globalThis["URL"]] = ...` is the same write.
   const throughTarget = (left: ts.Expression): string | undefined => {
-    const targets = ts.isArrayLiteralExpression(left) ? left.elements : [left];
-    for (const target of targets) {
-      if (ts.isOmittedExpression(target) || ts.isSpreadElement(target)) continue;
-      const element = peel(target);
-      if (!ts.isElementAccessExpression(element) || !globalObject(element.expression)) continue;
-      const written = cause("", element.argumentExpression);
-      if (written) return written;
+    const target = peel(left);
+    if (ts.isArrayLiteralExpression(target)) {
+      for (const element of target.elements) {
+        if (ts.isOmittedExpression(element) || ts.isSpreadElement(element)) continue;
+        const written = throughTarget(element);
+        if (written) return written;
+      }
+      return undefined;
     }
-    return undefined;
+    if (ts.isObjectLiteralExpression(target)) {
+      for (const property of target.properties) {
+        if (ts.isSpreadAssignment(property)) continue;
+        const written = ts.isPropertyAssignment(property) ? throughTarget(property.initializer)
+          : ts.isShorthandPropertyAssignment(property) ? throughTarget(property.name)
+          : undefined;
+        if (written) return written;
+      }
+      return undefined;
+    }
+    if (!ts.isElementAccessExpression(target) || !globalObject(target.expression)) return undefined;
+    // A key the check can read is refused by its own rule, which applies to every object, not only the global one.
+    if (literalKey(target.argumentExpression) !== undefined) return undefined;
+    return "a write to a computed global key";
   };
   if (ts.isBinaryExpression(node) && GLOBAL_ASSIGNMENTS.has(node.operatorToken.kind)) return throughTarget(node.left);
-  // A loop target is written on every iteration without an assignment of its own, so `for (globalThis["URL"] of ...)`
-  // rebinds the global just as a plain assignment does.
   if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
     return throughTarget(node.initializer);
   }
-  if (!ts.isCallExpression(node)) return undefined;
-  const member = memberName(node.expression);
-  const target = node.arguments[0];
-  if (!member || !target || !globalObject(target)) return undefined;
-  const owner = member.owner;
-  if (!ts.isIdentifier(owner)) return undefined;
-  const reflective = (owner.text === "Object" && (member.name === "defineProperty" || member.name === "defineProperties" || member.name === "assign")) ||
-    (owner.text === "Reflect" && (member.name === "set" || member.name === "defineProperty"));
-  if (!reflective) return undefined;
-  // `assign` takes a whole properties object, whose keys are never the literal this check can read.
-  return member.name === "assign" ? "a reflective write to a computed global key" : cause("reflective", node.arguments[1]);
+  return undefined;
 }
 
 /**
@@ -181,8 +239,19 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
         !(ts.isNewExpression(node.parent) && node.parent.expression === node)) {
       problems.push(`${at(node)}: URL must be the global constructor and may not be rebound`);
     }
-    // The same rebinding without an identifier: a string key or a reflective writer names no binding, so the rule
-    // above cannot see it.
+    // A `"URL"` key names the property without naming a binding, wherever it is written: `globalThis["URL"]`,
+    // `(0, globalThis)["URL"]`, a template key, an object's computed key and a destructuring target all land here.
+    if (propertyKey(node) === "URL") {
+      problems.push(`${at(node)}: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound`);
+    }
+    // A reflective writer reaches the property without a key this check can read, so it is refused by name rather
+    // than by the shape of the call: `Object.defineProperty`, `.call` on it, `Reflect.set` and an alias of either.
+    const reflective = reflectiveReference(node);
+    if (reflective) {
+      problems.push(`${at(node)}: ${reflective} may not redefine the global URL; URL must be the global constructor and may not be rebound`);
+    }
+    // The same rebinding without an identifier or a readable key: a key the check cannot read names no property, so
+    // the rules above cannot see it.
     const globalWrite = reflectiveGlobalWrite(node);
     if (globalWrite) {
       problems.push(`${at(node)}: ${globalWrite}; URL must be the global constructor and may not be rebound`);
@@ -216,44 +285,54 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
   return problems;
 }
 
-/** Reject direct filesystem access and non-public vault-mem imports in source files. */
+/**
+ * Reject direct filesystem access, non-public vault-mem imports and module-loader references in source files.
+ *
+ * Every message names the file and line, the form that was refused, and the next step.
+ */
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const violations: string[] = [];
   // The console takes panel assets as strings, so exactly one source file reads this package's own build output,
   // and only the two dist assets through calls this check verifies. It never names a vault path.
   const assetReader = /(?:^|[\\/])src[\\/]plugin[\\/]assets\.ts$/.test(filename);
-  const reject = (cause: string) => violations.push(`${filename}: ${cause} is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)`);
+  const at = (node: ts.Node) => `${filename}:${file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1}`;
+  const reject = (node: ts.Node, cause: string) => violations.push(`${at(node)}: ${cause} is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)`);
   // `named` is the construct the message holds responsible: a declaration reads `import node:fs`, while a call names
   // itself and its specifier, so a load-form message cannot be mistaken for a static import the file does not have.
-  const checkSpecifier = (specifier: string, named = `import ${specifier}`) => {
+  const checkSpecifier = (specifier: string, node: ts.Node, named = `import ${specifier}`) => {
     const childProcess = /^(?:node:)?child_process(?:\/|$)/.test(specifier);
     const fileSystem = /^(?:node:)?fs(?:\/|$)/.test(specifier);
-    if (childProcess || (fileSystem && !(assetReader && /^(?:node:)?fs$/.test(specifier)))) reject(named);
+    if (childProcess || (fileSystem && !(assetReader && /^(?:node:)?fs$/.test(specifier)))) reject(node, named);
     // `node:module` is how `createRequire` is obtained, and its `require` loads anything the list above refuses.
-    if (/^(?:node:)?module$/.test(specifier)) reject(named);
-    if (specifier === "bun:sqlite") reject(named);
-    if (specifier.startsWith("@staix/vault-mem/") && specifier !== "@staix/vault-mem/ui-plugin") reject("vault-mem internal import");
-    if (/vault-mem[\\/](?:src|dist|lib)[\\/]/.test(specifier)) reject("vault-mem internal path");
+    if (/^(?:node:)?module$/.test(specifier)) reject(node, named);
+    if (specifier === "bun:sqlite") reject(node, named);
+    if (specifier.startsWith("@staix/vault-mem/") && specifier !== "@staix/vault-mem/ui-plugin") reject(node, "vault-mem internal import");
+    if (/vault-mem[\\/](?:src|dist|lib)[\\/]/.test(specifier)) reject(node, "vault-mem internal path");
   };
   const forbidden = new Set(["file", "write", "spawn", "spawnSync", "$"]);
   const visit = (node: ts.Node): void => {
-    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) checkSpecifier(node.moduleSpecifier.text);
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) checkSpecifier(node.moduleSpecifier.text, node.moduleSpecifier);
+    // The loader by name, whatever the call around it looks like: `(0, require)(...)`, `require.call(...)`,
+    // `process.binding("fs")` and an alias all name it, so the class is closed here rather than call shape by call shape.
+    const loader = loaderReference(node);
+    if (loader) reject(node, loader);
     // A module load hands back the same module object as an import, whichever form reaches it, so each is held to the
-    // same list; a specifier the check cannot read is refused like any other.
-    const load = moduleLoadCall(node);
+    // same list; a specifier the check cannot read is refused like any other. A call made through a refused loader name
+    // is already refused there, and the line says it once.
+    const load = loader || (ts.isCallExpression(node) && loadsByLoaderName(node)) ? undefined : moduleLoadCall(node);
     if (load) {
       const arg = load.call.arguments[0];
-      if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, `${load.form}(${JSON.stringify(arg.text)})`);
-      else reject("nonliteral module loading");
+      if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, arg, `${load.form}(${JSON.stringify(arg.text)})`);
+      else reject(arg ?? load.call, "nonliteral module loading");
     }
     if (ts.isIdentifier(node) && node.text === "Bun") {
       const parent = node.parent;
       if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {
-        if (forbidden.has(parent.name.text)) reject(`Bun.${parent.name.text}`);
+        if (forbidden.has(parent.name.text)) reject(node, `Bun.${parent.name.text}`);
       } else if (ts.isElementAccessExpression(parent) && parent.expression === node) {
-        if (!ts.isStringLiteral(parent.argumentExpression) || forbidden.has(parent.argumentExpression.text)) reject("Bun computed access");
-      } else reject("Bun alias or destructuring");
+        if (!ts.isStringLiteral(parent.argumentExpression) || forbidden.has(parent.argumentExpression.text)) reject(node, "Bun computed access");
+      } else reject(node, "Bun alias or destructuring");
     }
     ts.forEachChild(node, visit);
   };

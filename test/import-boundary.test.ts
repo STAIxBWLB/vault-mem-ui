@@ -44,19 +44,46 @@ const bad = [
   // Under Bun the global object also answers to `global`, and its names reach each other.
   'global.process.getBuiltinModule("node:fs")',
   'globalThis.self.process.getBuiltinModule("node:fs")',
+  // The loader is refused by name, so no call shape can slip past it: a comma expression, `.call`, `.apply`, the
+  // deprecated builtin binding, and an alias all name the same loader the calls above name.
+  '(0, require)("node:fs")',
+  '(0, process.getBuiltinModule)("node:fs")',
+  'require.call(null, "node:fs")',
+  'require.apply(null, ["node:fs"])',
+  'process.getBuiltinModule.call(process, "node:fs")',
+  'process.getBuiltinModule.apply(process, ["node:fs"])',
+  'process.binding("fs")',
+  'process["binding"]("fs")',
+  'const g = process.getBuiltinModule;\ng("node:fs")',
+  'const r = require;\nr("node:fs")',
+  'const viaModule = module.require;\nviaModule("node:fs")',
+  'const cr = createRequire;\ncr(import.meta.url)("node:fs")',
+  // A loader named with a builtin this list allows is still a loader, so these are refused too.
+  'const path = process.getBuiltinModule("node:path");',
+  'const path = createRequire(import.meta.url)("node:path");',
 ];
 
 test("boundary catches prohibited access", () => {
   for (const source of bad) expect(boundaryViolations(source, "example.ts")).not.toEqual([]);
   expect(boundaryViolations('import x from "@staix/vault-mem/ui-plugin"', "example.ts")).toEqual([]);
-  // What is refused is the load, not the name: a builtin this list allows and an ordinary process read both pass.
-  for (const allowed of [
-    'const path = process.getBuiltinModule("node:path");',
-    'const path = createRequire(import.meta.url)("node:path");',
-    "const flag = process.env.CI;",
-  ]) {
+  // What is refused is the loader, not the specifier it is called with, so what stays allowed names no loader at all.
+  for (const allowed of ["const flag = process.env.CI;"]) {
     expect(boundaryViolations(allowed, "example.ts")).toEqual([]);
   }
+});
+
+// Every refusal says where it is, which form was refused, and what to do instead: file and line, the loader name or
+// the `URL` key, and the provider route.
+test("a refusal names the file, the line, the form and the next step", () => {
+  expect(boundaryViolations('const fs = process.binding("fs");', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:1: the binding property is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+  ]);
+  expect(boundaryViolations('const a = 1;\nconst fs = require("node:fs");', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:2: require is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+  ]);
+  expect(boundaryViolations('import { readFileSync } from "node:fs";\nglobalThis["URL"] = class {};', reader)).toEqual([
+    "src/plugin/assets.ts:2: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound",
+  ]);
 });
 
 // The asset reader is the one file where `node:fs` is allowed, so the exception is checked at the call, not granted
@@ -121,6 +148,16 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] of [class {}]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-of target writing the global URL"],
   ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] in { own: class {} }) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-in target writing the global URL"],
   ['import { readFileSync } from "node:fs";\nfor ([globalThis["URL"]] of [[class {}]]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring for-of target writing the global URL"],
+  // The forms issue #20's merge gate found still passing. A `URL` key is refused wherever it is written, so the
+  // receiver, the destructuring shape and the template key stop mattering; a reflective writer is refused by name, so
+  // a `.call` on it and an alias of it are the same reference.
+  ['import { readFileSync } from "node:fs";\n(0, globalThis)["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a comma-expression receiver writing the global URL"],
+  ['import { readFileSync } from "node:fs";\nObject.defineProperty.call(null, globalThis, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperty.call write to the global URL"],
+  ['import { readFileSync } from "node:fs";\n({ a: globalThis["URL"] } = { a: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an object destructuring write to the global URL"],
+  ['import { readFileSync } from "node:fs";\n[[globalThis["URL"]]] = [[class {}]];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a nested destructuring write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nglobalThis[`URL`] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a template-keyed write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nconst define = Object.defineProperty;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Object.defineProperty"],
+  ['import { readFileSync } from "node:fs";\nconst reflect = Reflect;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Reflect"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
