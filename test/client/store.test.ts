@@ -256,6 +256,34 @@ describe("start", () => {
 });
 
 describe("writes", () => {
+  test("a slow confirmation can be closed and its late answer is ignored", async () => {
+    const { host, pending } = deferredAction();
+    const store = createStore(host, { confirmWaitMs: 5 });
+    const preview = store.beginWrite({ action: "delete", path: "notes/a.md" });
+    pending[0]!.resolve({ ok: false, needsConfirm: true, fingerprint: "fp" });
+    await preview;
+    const confirmation = store.confirmWriteNow();
+    await Bun.sleep(15);
+    expect(store.getState().write).toMatchObject({ phase: "waiting", message: expect.stringContaining("may already be applied") });
+    store.setWrite({ phase: "idle" });
+    pending[1]!.resolve({ ok: true, message: "done" });
+    await confirmation;
+    expect(store.getState().write).toEqual({ phase: "idle" });
+  });
+
+  test("a host-owned confirmation ignores a second action until the first settles", async () => {
+    const { host, pending } = deferredAction();
+    host.confirm = "host";
+    const store = createStore(host);
+    const first = store.beginWrite({ action: "delete", path: "notes/a.md" });
+    await store.beginWrite({ action: "delete", path: "notes/b.md" });
+    expect(host.calls.action).toHaveLength(1);
+    pending[0]!.resolve({ ok: true, message: "done" });
+    await first;
+    expect(store.getState().write).toEqual({ phase: "idle" });
+    await Bun.sleep(0);
+    expect(host.calls.snapshot.length).toBeGreaterThan(0);
+  });
   test("a second confirmation and cancellation are ignored while the first is in flight", async () => {
     const { host, pending } = deferredAction();
     const store = createStore(host);

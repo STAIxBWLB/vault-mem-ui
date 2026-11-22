@@ -154,7 +154,7 @@ export function WriteDialog(props: { state: WriteState; onConfirm(): void; onCan
   useEffect(() => { if (state.phase === "confirming") box.current?.focus(); }, [state.phase]);
 
   if (!open) return null;
-  const heading = state.phase === "preview" || state.phase === "confirming" ? state.verb : state.phase === "done" ? "Done" : state.phase === "cancelled" ? "Cancelled" : "Refused";
+  const heading = state.phase === "preview" || state.phase === "confirming" ? state.verb : state.phase === "waiting" ? "Still waiting" : state.phase === "done" ? "Done" : state.phase === "cancelled" ? "Cancelled" : "Refused";
   const trap = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab") return;
     const inside = box.current;

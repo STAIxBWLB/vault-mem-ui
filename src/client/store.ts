@@ -20,6 +20,8 @@ export interface StoreOptions {
   /** Poll interval when the host does not push snapshots. */
   intervalMs?: number;
   initialPanel?: string;
+  /** Time before a pending confirmation can be dismissed. */
+  confirmWaitMs?: number;
 }
 
 export interface ClientStore {
@@ -61,6 +63,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
   // The write flow that owns the dialog right now. A pending preview or confirmation may only land while its ticket
   // is still current, so a reply cannot reopen a write on a panel or view the person already left, or after Cancel.
   let ticket = 0;
+  let hostWritePending = false;
   const own = (write: WriteState) => {
     ticket += 1;
     set({ write });
@@ -111,9 +114,10 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       own(write);
     },
     async beginWrite(input) {
-      if (state.write.phase === "confirming") return;
+      if (state.write.phase === "confirming" || state.write.phase === "waiting" || hostWritePending) return;
       const mine = ++ticket;
-      const result = await startWrite(host, input);
+      if (host.confirm === "host") hostWritePending = true;
+      const result = await startWrite(host, input).finally(() => { hostWritePending = false; });
       // The person moved to another panel, another note or another write while this preview was in flight.
       if (mine !== ticket) return;
       // A host that owns the confirmation already told the person through its own notification (`quiet`), so the
@@ -126,7 +130,11 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       if (current.phase !== "preview") return;
       const mine = ++ticket;
       set({ write: { phase: "confirming", verb: current.verb } });
+      const timer = setTimeout(() => {
+        if (mine === ticket) set({ write: { phase: "waiting", message: "Still waiting for the vault. It may already be applied; reload the panel to see the current state." } });
+      }, options.confirmWaitMs ?? 30_000);
       const result = await confirmWrite(host, current);
+      clearTimeout(timer);
       if (mine !== ticket) return;
       set({ write: result });
       if (result.phase === "done") void store.refresh();

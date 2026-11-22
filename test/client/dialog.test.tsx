@@ -76,6 +76,14 @@ describe("WriteDialog focus", () => {
     expect(focused()).toBe(dialog());
   });
 
+  test("the waiting notice offers a way to close", () => {
+    let closed = 0;
+    mount({ phase: "waiting", message: "Still waiting for the vault. It may already be applied; reload the panel to see the current state." }, () => { closed += 1; });
+    expect(dialog()?.textContent).toContain("may already be applied");
+    act(() => dialog()!.querySelector("button")!.click());
+    expect(closed).toBe(1);
+  });
+
   test("opening moves the focus into the dialog, so the panel behind it cannot be typed into", () => {
     const opener = outside();
     mount(preview);

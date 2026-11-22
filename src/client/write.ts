@@ -11,6 +11,7 @@ import type { ActionInput, ActionResult, Change, Host } from "./host.ts";
 export type WriteState =
   | { phase: "idle" }
   | { phase: "confirming"; verb: string }
+  | { phase: "waiting"; message: string }
   | {
       phase: "preview";
       input: ActionInput;
@@ -110,6 +111,7 @@ export async function confirmWrite(host: Host, state: WriteState): Promise<Write
     // showing that preview again is safer than treating it as done.
     return fromReply(reply, state.input);
   } catch (error) {
-    return { phase: "error", message: problemText(error, `${state.verb} was not confirmed`) };
+    const cause = error instanceof Error ? error.message : String(error ?? "");
+    return { phase: "error", message: `${state.verb}: ${cause || "confirmation failed"}. It may already have been applied; reload the panel to check the current state.` };
   }
 }
