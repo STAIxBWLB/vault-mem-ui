@@ -10,3 +10,15 @@ test("a tarball is refused by name for every entry it is missing", () => {
   }
   expect(tarballProblems([...REQUIRED_ENTRIES, "package/dist/metafile.json"])).toEqual([]);
 });
+
+// The cases above are built from REQUIRED_ENTRIES, so deleting an entry would shrink them and still pass. The list is
+// pinned here instead: dropping one of these five files from it fails, and so does adding a sixth.
+test("the required entries are exactly these five files", () => {
+  expect(REQUIRED_ENTRIES).toEqual([
+    "package/package.json",
+    "package/src/plugin/index.ts",
+    "package/dist/panel.js",
+    "package/dist/panel.css",
+    "package/bin/vmem-ui.ts",
+  ]);
+});
