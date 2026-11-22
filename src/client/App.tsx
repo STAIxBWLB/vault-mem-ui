@@ -14,6 +14,7 @@ import { LogView } from "./views/log.tsx";
 import { NoteView } from "./views/note.tsx";
 import { NotesView } from "./views/notes.tsx";
 import { OverviewView } from "./views/overview.tsx";
+import { ProposalsView } from "./views/proposals.tsx";
 import { SettingsView } from "./views/settings.tsx";
 import { PromoteView } from "./views/promote.tsx";
 import { GraphPanel } from "../graph/view/GraphView.tsx";
@@ -27,6 +28,7 @@ const TITLES: Record<string, string> = {
   log: "Log",
   graph: "Graph",
   settings: "Settings",
+  proposals: "Proposals",
 };
 
 export const VIEWS = {
@@ -38,6 +40,7 @@ export const VIEWS = {
   log: LogView,
   graph: GraphPanel,
   settings: SettingsView,
+  proposals: ProposalsView,
 };
 
 export type Navigate = (panel: string, params?: Record<string, string>) => void;
