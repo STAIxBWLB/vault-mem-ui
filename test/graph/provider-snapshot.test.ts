@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createVaultMcp } from "@staix/vault-mem";
 import { plugin as providerPlugin } from "@staix/vault-mem/ui-plugin";
 import type { GraphPanelPage } from "@staix/vault-mem/ui-plugin";
-import { assembleGraphPages } from "../../src/graph/view/graph-snapshot.ts";
+import { assembleGraphPages, assembleSemanticPages, SEMANTIC_DEFAULTS } from "../../src/graph/view/graph-snapshot.ts";
 import { buildGraphModel } from "../../src/graph/model.ts";
 import { createGraphViewStore } from "../../src/graph/view/state.ts";
 import { buildDecisionChains } from "../../src/graph/decisionChains.ts";
@@ -146,8 +146,35 @@ test("edge confidence accepts scalar and per-edge tags, and rejects malformed ta
   const result = await assembleGraphPages(async () => mixed, first, {});
   expect((result.graph as GraphInput).edges.map((item) => item.inferred)).toEqual([true, false]);
   for (const invalid of ["UNKNOWN", [], ["INFERRED", "EXTRACTED"], ["UNKNOWN"], Array(1), null]) {
-    expect((await assemble(invalid)).error).toBe("Graph edge columns are invalid; restart from the first page.");
+    expect((await assemble(invalid)).error).toBe("Graph confidence tag is invalid or unsupported; update @staix/vault-mem-ui.");
   }
+});
+
+test("enrichment metadata is optional and malformed values are refused", async () => {
+  const pages = fakePages();
+  const run = (first: Record<string, unknown>) => assembleGraphPages(async () => pages[1]!, first, {});
+  expect((await run(pages[0]!)).enrichment).toBeUndefined();
+  const enrichment = { model: "synthetic", embedded: 1, total: 2 };
+  expect((await run({ ...pages[0], enrichment })).enrichment).toEqual(enrichment);
+  for (const invalid of [null, {}, { model: 5, embedded: 1, total: 2 }, { model: null, embedded: -1, total: 2 }, { model: null, embedded: 3, total: 2 }]) {
+    expect((await run({ ...pages[0], enrichment: invalid })).error).toContain("invalid enrichment metadata");
+  }
+});
+
+test("semantic pages assemble in order and refuse a changed revision", async () => {
+  const calls: Record<string, unknown>[] = [];
+  const make = (offset: number, next: string | null) => ({ schema: 1, kind: "semantic", vault: "test", revision: "rev", offset, count: 1, semantic: { source: [0], target: [1], score: [0.9] }, next });
+  const query = async (input: Record<string, unknown>) => { calls.push(input); return input.page ? make(1, null) : make(0, "next"); };
+  expect(await assembleSemanticPages(query, "test", "rev", 2)).toEqual({ edges: [{ source: 0, target: 1, score: 0.9 }, { source: 0, target: 1, score: 0.9 }] });
+  expect(calls).toEqual([{ panel: "graph", vault: "test", semantic: SEMANTIC_DEFAULTS }, { panel: "graph", vault: "test", semantic: SEMANTIC_DEFAULTS, page: "next" }]);
+  expect(await assembleSemanticPages(async (input) => input.page ? { ...make(1, null), revision: "other" } : make(0, "next"), "test", "rev", 2)).toEqual({ error: "Graph changed while loading semantic layout; restart from the first page." });
+});
+
+test("semantic pair limit scales with graph size", async () => {
+  const page = (count: number) => ({ schema: 1, kind: "semantic", vault: "test", revision: "rev", offset: 0, count, semantic: { source: Array(count).fill(0), target: Array(count).fill(1), score: Array(count).fill(0.9) }, next: null });
+  const supported = await assembleSemanticPages(async () => page(60_001), "test", "rev", 10_000);
+  expect("edges" in supported && supported.edges.length).toBe(60_001);
+  expect(await assembleSemanticPages(async () => page(17), "test", "rev", 2)).toEqual({ error: "Semantic graph page exceeds the supported number of similarity pairs; update @staix/vault-mem or report its version." });
 });
 
 test("provider columnar unresolved placeholders stay non-navigable", async () => {

@@ -20,6 +20,13 @@ const LINK_TARGET_LIMIT = 200;
 export interface LinkProposal {
   propose(input: { from: string; to: string; relation: LinkRelation; bidirectional: boolean }): void;
 }
+export interface SimilarNotes {
+  loading: boolean;
+  hits: { path: string; title: string; score: number }[];
+  error?: string;
+  select(path: string): void;
+  contains(path: string): boolean;
+}
 
 export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleIds, chainFocusIds, hasSupersedes, search = "", focus, open }: { model: GraphModel; visibleIds: Set<string>; chainFocusIds: Set<string>; hasSupersedes: boolean; search?: string; focus(ids: string[]): void; open(id: string): void }) {
   const layout = useMemo(() => buildDecisionChains(model), [model]);
@@ -126,11 +133,11 @@ function LinkForm({ node, model, propose }: { node: GraphNode; model: GraphModel
   );
 }
 
-export function GraphInspector({ node, model, open, link }: { node: GraphNode | null; model: GraphModel; open(id: string): void; link?: LinkProposal }) {
+export function GraphInspector({ node, model, open, link, similar }: { node: GraphNode | null; model: GraphModel; open(id: string): void; link?: LinkProposal; similar?: SimilarNotes }) {
   if (!node) return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><p>Select a note to inspect it.</p></section>;
   const labels = new Map(model.nodes.map((item) => [item.id, item.label]));
   const related = model.edges.filter((edge) => edge.source === node.id || edge.target === node.id);
-  return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}{link ? <LinkForm key={node.id} node={node} model={model} propose={link.propose} /> : null}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation}{edge.inferred ? ", inferred" : ""})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}</section>;
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}{link ? <LinkForm key={node.id} node={node} model={model} propose={link.propose} /> : null}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation}{edge.inferred ? ", inferred" : ""})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}{similar && <><h3>Similar notes</h3>{similar.loading && <p>Loading similar notes...</p>}{similar.error && <p className="vmem-notice vmem-notice-err" role="alert">{similar.error}</p>}{!similar.loading && !similar.error && !similar.hits.length && <p>No similar notes.</p>}<ul>{similar.hits.map((hit) => <li key={hit.path}><button type="button" className="vmem-button" disabled={!similar.contains(hit.path)} onClick={() => similar.select(hit.path)}>{hit.title || hit.path} ({hit.score.toFixed(2)})</button></li>)}</ul></>}</section>;
 }
 
 export function GraphInsightsPanel({ model, visibleIds, select }: { model: GraphModel; visibleIds: Set<string>; select(id: string): void }) {

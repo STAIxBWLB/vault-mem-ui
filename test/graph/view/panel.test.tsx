@@ -10,7 +10,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { CanvasDeps, GraphLike, SigmaLike } from "../../../src/graph/view/canvas";
 import { GraphPanel, configureGraph } from "../../../src/graph/view/GraphView.tsx";
-import type { ActionInput } from "../../../src/client/host.ts";
+import type { ActionInput, SnapshotReply } from "../../../src/client/host.ts";
 import type { FromWorker, ToWorker } from "../../../src/graph/layout/protocol";
 
 let root: Root | null = null;
@@ -97,12 +97,12 @@ const graph = {
   ],
 };
 
-async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}, theme?: { mode: "light" | "dark" }, options: { beginWrite?(input: ActionInput): void; params?: Record<string, string> } = {}) {
+async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}, theme?: { mode: "light" | "dark" }, options: { beginWrite?(input: ActionInput): void; params?: Record<string, string>; graphSnapshot?(input: Record<string, unknown>): Promise<SnapshotReply> } = {}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<GraphPanel reply={reply} params={options.params ?? {}} navigate={navigate} beginWrite={options.beginWrite ?? (() => {})} theme={theme} />);
+    root!.render(<GraphPanel reply={reply} params={options.params ?? {}} navigate={navigate} beginWrite={options.beginWrite ?? (() => {})} graphSnapshot={options.graphSnapshot} theme={theme} />);
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
@@ -110,6 +110,77 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("enrichment is optional, and similar notes load only after selecting a note", async () => {
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const calls: Record<string, unknown>[] = [];
+    const query = async (input: Record<string, unknown>) => { calls.push(input); return { similar: [{ path: "b.md", title: "Beta", score: 0.91 }] }; };
+    await mount({ graph }, () => {}, undefined, { graphSnapshot: query });
+    expect(container.textContent).not.toContain("Semantic layout");
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    expect(calls).toHaveLength(0);
+    act(() => root!.unmount()); root = null; container.remove();
+    await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
+    expect(container.textContent).toContain("Semantic layout");
+    expect(calls).toHaveLength(0);
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" })); await flush();
+    expect(calls).toEqual([{ vault: "work", similar: "notes/a.md", limit: 10 }]);
+    const hit = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Beta (0.91)"))!;
+    await act(async () => hit.click()); await flush();
+    expect(container.querySelector('[aria-label="Graph inspector"]')?.textContent).toContain("Beta");
+  });
+
+  test("similar provider refusal is displayed unchanged", async () => {
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const error = "enrichment: missing vector; add an embedding and retry";
+    await mount({ graph, enrichment: { model: null, embedded: 0, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: async () => ({ error }) });
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" })); await flush();
+    expect(container.querySelector('[aria-label="Graph inspector"]')?.textContent).toContain(error);
+  });
+
+  test("a changed semantic revision offers the first graph page", async () => {
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const navigated: unknown[] = [];
+    await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, (panel, params) => navigated.push([panel, params]), undefined, { graphSnapshot: async () => ({ schema: 1, kind: "semantic", vault: "work", revision: "new", offset: 0, count: 0, semantic: { source: [], target: [], score: [] }, next: null }) });
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click());
+    await flush();
+    expect(container.textContent).toContain("restart from the first page");
+    expect(container.querySelector<HTMLButtonElement>('button[aria-pressed="false"]') !== null).toBe(true);
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "First page")!.click());
+    expect(navigated).toEqual([["graph", { vault: "work" }]]);
+  });
+
+  test("semantic springs reach only the worker, not canvas edges or export", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    let blob: Blob | undefined;
+    const create = spyOn(URL, "createObjectURL").mockImplementation((value) => { blob = value as Blob; return "blob:synthetic"; });
+    const click = spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    try {
+    const calls: Record<string, unknown>[] = [];
+    const query = async (input: Record<string, unknown>) => { calls.push(input); return { schema: 1, kind: "semantic", vault: "work", revision: "rev", offset: 0, count: 1, semantic: { source: [0], target: [2], score: [0.8] }, next: null }; };
+    await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
+    const first = FakeWorker.last!; await act(async () => { first.emit({ type: "ready" } as FromWorker); }); await flush();
+    expect(calls).toHaveLength(0);
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click(); }); await flush();
+    const worker = FakeWorker.last!;
+    expect(worker).not.toBe(first);
+    const init = worker.sent.find((message) => message.type === "init")!;
+    if (init.type !== "init") throw new Error("missing worker init");
+    expect([...init.graph.sources]).toEqual([0, 1, 0]);
+    expect([...init.graph.targets]).toEqual([1, 2, 2]);
+    expect([...init.graph.weights!][2]).toBeCloseTo(0.8);
+    expect(fake.edgeAttrs.size).toBe(2);
+    expect(container.textContent).toContain("2 links");
+    expect(calls[0]).toMatchObject({ vault: "work", semantic: { k: 8, minScore: 0.75 } });
+    await act(async () => { worker.emit({ type: "ready" } as FromWorker); }); await flush();
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Export filtered graph HTML")!.click(); });
+    const html = await blob!.text();
+    const packet = JSON.parse(html.match(/<script id="graph-data" type="application\/json">([^<]*)<\/script>/)![1]!);
+    const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0))));
+    expect(data.edges).toHaveLength(2);
+    expect(data.edges.some((edge: { source: string; target: string }) => edge.source === "a" && edge.target === "c")).toBe(false);
+    } finally { create.mockRestore(); click.mockRestore(); }
+  });
   test("hiding inferred links updates the canvas view and exported graph", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
@@ -404,12 +475,12 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     let workers = 0;
     configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => { workers += 1; return new FakeWorker() as unknown as Worker; } });
-    await mount({ graph });
+    await mount({ graph, graphStats: { vault: "work", revision: "old" } });
     await act(async () => { FakeWorker.last!.emit({ type: "ready" } as FromWorker); });
     await flush();
     await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
     const render = (g: unknown) => act(async () => {
-      root!.render(<GraphPanel reply={{ graph: g }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
+      root!.render(<GraphPanel reply={{ graph: g, graphStats: { vault: "work", revision: "new" } }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
     });
     await render(structuredClone(graph));
     await flush();

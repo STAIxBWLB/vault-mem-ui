@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { globalKey, prefersReducedMotion } from "./a11y.ts";
 import { Notice, WriteDialog } from "./components.tsx";
-import type { ActionInput, Host } from "./host.ts";
+import type { ActionInput, Host, SnapshotReply } from "./host.ts";
 import { PANEL_IDS, type ThemePref } from "./prefs.ts";
 import { createStore, type ClientStore, type ClientState } from "./store.ts";
 import { AssertionsView } from "./views/assertions.tsx";
@@ -55,6 +55,7 @@ export interface PanelViewProps {
   state: ClientState;
   onNavigate: Navigate;
   onWrite(input: ActionInput): void;
+  graphSnapshot?(params: Record<string, unknown>): Promise<SnapshotReply>;
   onTheme(theme: ThemePref): void;
   onConfirm(): void;
   onCancel(): void;
@@ -108,7 +109,7 @@ export function PanelView(props: PanelViewProps) {
         {state.phase === "error" && state.error ? <Notice tone="err">{state.error}</Notice> : null}
         {state.phase === "loading" && !state.reply ? <p className="vmem-sub">Loading {TITLES[state.panel] ?? state.panel}…</p> : null}
         {state.reply ? (
-          <View reply={state.reply} params={state.params} navigate={props.onNavigate} beginWrite={props.onWrite} theme={state.theme} />
+          <View reply={state.reply} params={state.params} navigate={props.onNavigate} beginWrite={props.onWrite} graphSnapshot={props.graphSnapshot} theme={state.theme} />
         ) : null}
       </main>
       <WriteDialog state={state.write} onConfirm={props.onConfirm} onCancel={props.onCancel} />
@@ -152,6 +153,7 @@ export function App({ store }: { store: ClientStore }) {
         state={state}
         onNavigate={(panel, params) => store.navigate(panel, params)}
         onWrite={(input) => void store.beginWrite(input)}
+        graphSnapshot={store.graphSnapshot}
         onTheme={(theme) => store.setTheme(theme)}
         onConfirm={() => void store.confirmWriteNow()}
         onCancel={() => store.setWrite({ phase: "idle" })}

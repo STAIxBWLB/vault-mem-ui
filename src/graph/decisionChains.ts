@@ -31,7 +31,7 @@ function orderChain(nodes: GraphNode[], forward: Map<string, Set<string>>): Grap
   const members = new Map(nodes.map((node) => [node.id, node]));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   for (const node of nodes) for (const next of forward.get(node.id) ?? []) if (members.has(next)) indegree.set(next, indegree.get(next)! + 1);
-  // The graph is capped at 10,000 nodes. Keep ready nodes in reverse order so removal is a simple pop.
+  // ponytail: sorted insertion is O(n^2) at the 10,000-node cap; replace with a priority queue if that ceiling grows.
   const ready: GraphNode[] = [];
   const enqueue = (node: GraphNode) => {
     let low = 0, high = ready.length;
