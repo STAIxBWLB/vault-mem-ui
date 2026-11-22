@@ -1,7 +1,8 @@
 /**
  * Synthetic 10k nodes / 100k edges measurement of the graph canvas update paths (run by hand, not in CI):
  *   bun run scripts/bench-graph-view.ts
- * Uses the real graphology graph and a Sigma stub that counts refresh calls; WebGL rendering is not measured.
+ * These numbers price the canvas logic only: the real graphology graph is used, but Sigma is a stub that counts
+ * refresh calls, so Sigma's own indexing, reduce and program cost is not measured and WebGL is not touched at all.
  * The "before" rows replay what the canvas did before this change: one setNodeAttribute per coordinate and a full
  * refresh per store update.
  */
@@ -31,6 +32,8 @@ const sigma: SigmaLike = {
   // Sigma's setSetting calls scheduleRefresh(), i.e. a full re-index whose process() waits for the next frame.
   setSetting: () => { full += 1; },
   refresh: (o) => { if (o?.partialGraph) light += 1; else full += 1; },
+  // Always covered, so every path here takes the reducer-only repaint this bench is pricing; Sigma's own index
+  // bookkeeping is what the stub does not model.
   hasProgramIndices: () => true,
 };
 const store = createGraphViewStore(model);
@@ -46,6 +49,7 @@ const time = (label: string, runs: number, fn: (i: number) => void) => {
 };
 
 console.log(`graph: ${model.nodes.length} nodes, ${model.edges.length} edges`);
+console.log("canvas logic only: real graphology, a counting Sigma stub — Sigma's indexing, reducers, programs and WebGL are not measured.");
 const batch = new Float32Array(N * 2).map((_, i) => (i % 97) - 48);
 time("batch: per-coordinate setNodeAttribute (before)", 10, () => {
   model.nodes.forEach((node, i) => { graph.setNodeAttribute(node.id, "x", batch[i * 2]!); graph.setNodeAttribute(node.id, "y", batch[i * 2 + 1]!); });
