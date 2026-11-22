@@ -66,11 +66,21 @@ A release is one tag on a green `main`: the tag runs the checks again, packs onc
 
 `@staix/vault-mem-ui` has never been published (`npm view @staix/vault-mem-ui` answers 404), and npm's trusted publishing is configured on a package that already exists, which the flow here needs: the publish job has no npm token and reaches the registry only through OIDC. So the first release is three steps, all of them a person's:
 
-1. Publish once by hand: `npm publish --access public --provenance=false`. `--provenance=false` overrides `publishConfig.provenance`, which asks for an OIDC identity a local shell does not have.
-2. Attach the trusted publisher, the same configuration as the list below: `npm trust github @staix/vault-mem-ui --file release.yml --repository STAIxBWLB/vault-mem-ui --environment npm-production --allow-publish` (npm 12 has this command; `npm trust --help` lists its flags).
-3. Set `NPM_PUBLISH_ENABLED=true`, then release the next version through the tag flow above, which publishes with provenance from then on. npm's docs say an unvalidated trusted-publisher configuration expires, so the first tag release should follow step 2 rather than wait.
+1. Bootstrap the package name once, from a clean `main` checkout that still holds the placeholder version `0.0.0`. `dist/` is not in git (it is ignored), so publishing the checkout would ship whatever build it happens to hold; run the gates and publish the bytes the smoke test installed instead:
 
-Unverified from this repository, and none of it attempted here: that the manual first publish succeeds, that `npm trust` accepts a package before its first publish rather than requiring one that exists, and how long an unvalidated configuration lasts. Everything else in this section names what was run, with its result, in the release PR.
+   ```sh
+   bun install --frozen-lockfile && bun run check
+   mkdir -p /tmp/vmem-bootstrap
+   npm pack --ignore-scripts --pack-destination /tmp/vmem-bootstrap
+   bun scripts/package-smoke.ts /tmp/vmem-bootstrap/staix-vault-mem-ui-0.0.0.tgz
+   npm publish /tmp/vmem-bootstrap/staix-vault-mem-ui-0.0.0.tgz --access public --provenance=false --tag bootstrap
+   ```
+
+   That publishes the placeholder `0.0.0`, not the release-prep version: npm never lets a published version be reused, so spending `0.0.0` here keeps the release-prep version free for the tag flow, and `--tag bootstrap` leaves `latest` unset, so `npm i @staix/vault-mem-ui` stays unresolved until the first real release. `--provenance=false` overrides `publishConfig.provenance`, which asks for an OIDC identity a local shell does not have. If that checkout's `package.json` already names a release version, stop before publishing: that version belongs to the tag flow, and publishing it here would make the tag release fail as already on the registry.
+2. Attach the trusted publisher, the same configuration as the list below: `npm trust github @staix/vault-mem-ui --file release.yml --repository STAIxBWLB/vault-mem-ui --environment npm-production --allow-publish` (npm 12 has this command; `npm trust --help` lists its flags).
+3. Set `NPM_PUBLISH_ENABLED=true`. The release-prep PR then sets the first real version and its dated changelog section, and the first tag release publishes that version with provenance.
+
+Unverified from this repository, and none of it attempted here: that the gated bootstrap publish in step 1 succeeds, that `npm trust` accepts a package before any release version exists rather than requiring one, and how long an unvalidated configuration lasts. What is measured: `npm view @staix/vault-mem-ui` answers 404, `dist/` is ignored by git, `npm trust github` takes exactly those flags in npm 12.2.2, and `scripts/package-smoke.ts` installs and runs a packed tarball (see the release PR).
 
 The `Publish approved artifact with npm OIDC` job runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true`; `Publish the GitHub release` follows it. Settings a person configures once, none of which this repository sets up:
 
