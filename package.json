@@ -33,6 +33,7 @@
     "test": "bun test",
     "build": "bun build src/client/panel.tsx --outdir dist --target browser --format esm --minify --define 'process.env.NODE_ENV=\"production\"' --metafile=dist/metafile.json && cp src/client/panel.css dist/panel.css && bun run scripts/check-notices.ts",
     "check": "bun run build && bun run typecheck && bun run test",
+    "smoke:package": "bun scripts/package-smoke.ts",
     "release:tag": "bun scripts/release-tag.ts"
   },
   "dependencies": {
