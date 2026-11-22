@@ -58,6 +58,12 @@ const bad = [
   'const r = require;\nr("node:fs")',
   'const viaModule = module.require;\nviaModule("node:fs")',
   'const cr = createRequire;\ncr(import.meta.url)("node:fs")',
+  // A destructuring pattern is where the alias is created, so the key is refused there too: shorthand, renamed, and
+  // nested inside another pattern.
+  'const { getBuiltinModule } = process;\ngetBuiltinModule("node:fs")',
+  'const { getBuiltinModule: g } = process;\ng("node:fs")',
+  'const { binding } = process;\nbinding("fs")',
+  'function f({ process: { binding } }) { return binding("fs") }',
   // A loader named with a builtin this list allows is still a loader, so these are refused too.
   'const path = process.getBuiltinModule("node:path");',
   'const path = createRequire(import.meta.url)("node:path");',
@@ -67,7 +73,8 @@ test("boundary catches prohibited access", () => {
   for (const source of bad) expect(boundaryViolations(source, "example.ts")).not.toEqual([]);
   expect(boundaryViolations('import x from "@staix/vault-mem/ui-plugin"', "example.ts")).toEqual([]);
   // What is refused is the loader, not the specifier it is called with, so what stays allowed names no loader at all.
-  for (const allowed of ["const flag = process.env.CI;"]) {
+  // An array pattern's elements name no property, so they are not a destructuring alias of anything.
+  for (const allowed of ["const flag = process.env.CI;", "const [name] = list;"]) {
     expect(boundaryViolations(allowed, "example.ts")).toEqual([]);
   }
 });
@@ -158,6 +165,13 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nglobalThis[`URL`] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a template-keyed write to the global URL"],
   ['import { readFileSync } from "node:fs";\nconst define = Object.defineProperty;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Object.defineProperty"],
   ['import { readFileSync } from "node:fs";\nconst reflect = Reflect;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Reflect"],
+  // A destructuring pattern introduces the writer too, and `assign` writes a whole properties object whose keys are
+  // never the literal this check can read.
+  ['import { readFileSync } from "node:fs";\nObject.assign(globalThis, props);\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign of a properties object the check cannot read"],
+  ['import { readFileSync } from "node:fs";\nconst { defineProperty } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperty introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { assign } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { Reflect } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a Reflect introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { URL: U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a URL key read by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];

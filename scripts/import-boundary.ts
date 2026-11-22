@@ -57,43 +57,62 @@ function propertyKey(node: ts.Node): string | undefined {
   return undefined;
 }
 
+/**
+ * A name written as a property key: `owner.name`, `{ name: value }`, and a destructuring `{ name }` or `{ name: local }`.
+ * A destructuring pattern is where an alias of a loader is introduced (`const { getBuiltinModule } = process`), so a key
+ * has to be recognised in a pattern as well as in an access.
+ */
+function propertyName(node: ts.Node): string | undefined {
+  if (!ts.isIdentifier(node)) return undefined;
+  const parent = node.parent;
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) return node.text;
+  if ((ts.isPropertyAssignment(parent) || ts.isShorthandPropertyAssignment(parent)) && parent.name === node) return node.text;
+  if (ts.isBindingElement(parent)) {
+    if (parent.propertyName === node) return node.text;
+    // `{ name }` is `{ name: name }` in an object pattern; an array pattern's elements name no property.
+    if (!parent.propertyName && parent.name === node && ts.isObjectBindingPattern(parent.parent)) return node.text;
+  }
+  return undefined;
+}
+
 /** The names a module loader answers to on its own, whichever way the reference is written. */
 const LOADER_IDENTIFIERS = new Set(["require", "createRequire"]);
 /** The names a property may carry: `process.getBuiltinModule`, `process.binding`, `module.require`, `require.resolve`. */
 const LOADER_PROPERTIES = new Set(["require", "getBuiltinModule", "binding", "createRequire"]);
-/** The writers that reach a property without naming a binding. */
-const REFLECTIVE_PROPERTIES = new Set(["defineProperty", "defineProperties"]);
+/** The writers that reach a property without naming a binding; `assign` writes a whole properties object at once. */
+const REFLECTIVE_NAMES = new Set(["defineProperty", "defineProperties", "assign", "Reflect"]);
 
 /**
  * A reference to a module loader, not only a call to one. This is the rule that closes the class: `(0, require)(...)`,
  * `require.call(...)`, `require.apply(...)`, `process.binding("fs")` and `const g = process.getBuiltinModule` all name
- * the loader itself, so each is refused by name instead of by the shape of the call around it. Runtime code under src/
- * names none of these (the boundary test scans every source file), and `require` and `createRequire` are refused as bare
- * identifiers as well, because an import binding or an alias is the same name.
+ * the loader itself, so each is refused by name instead of by the shape of the call around it, and a destructuring
+ * `const { getBuiltinModule } = process` names it just as much. Runtime code under src/ names none of these (the
+ * boundary test scans every source file), and `require` and `createRequire` are refused as bare identifiers as well,
+ * because an import binding or an alias is the same name.
  */
 function loaderReference(node: ts.Node): string | undefined {
-  if (ts.isIdentifier(node) && LOADER_IDENTIFIERS.has(node.text)) {
-    // A property name is reported as the property it is by the branch below, so `module.require` counts once.
-    const written = ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
-    if (!written) return node.text;
-  }
-  const named = ts.isPropertyAccessExpression(node) && LOADER_PROPERTIES.has(node.name.text) ? node.name.text : undefined;
+  const written = propertyName(node);
   const keyed = propertyKey(node);
-  const name = named ?? (keyed !== undefined && LOADER_PROPERTIES.has(keyed) ? keyed : undefined);
-  return name === undefined ? undefined : `the ${name} property`;
+  const name = written !== undefined && LOADER_PROPERTIES.has(written) ? written
+    : keyed !== undefined && LOADER_PROPERTIES.has(keyed) ? keyed
+    : undefined;
+  if (name !== undefined) return `the ${name} property`;
+  return ts.isIdentifier(node) && LOADER_IDENTIFIERS.has(node.text) ? node.text : undefined;
 }
 
 /**
- * A reflective writer by name: `Object.defineProperty`, `Object.defineProperties` and `Reflect` reach a property without
- * naming a binding, so `Object.defineProperty.call(null, globalThis, "URL", ...)` and an alias of either are refused by
- * the reference rather than by the shape of the call.
+ * A reflective writer by name: `Object.defineProperty`, `Object.defineProperties`, `Object.assign` and `Reflect` reach a
+ * property without naming a binding, so `Object.defineProperty.call(null, globalThis, "URL", ...)`, `Object.assign` with
+ * a properties object this check cannot read, `const { defineProperty } = Object` and an alias of any of them are
+ * refused by the reference rather than by the shape of the call.
  */
 function reflectiveReference(node: ts.Node): string | undefined {
-  if (ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
-  const named = ts.isPropertyAccessExpression(node) && REFLECTIVE_PROPERTIES.has(node.name.text) ? node.name.text : undefined;
+  const written = propertyName(node);
   const keyed = propertyKey(node);
-  const name = named ?? (keyed !== undefined && REFLECTIVE_PROPERTIES.has(keyed) ? keyed : undefined);
-  return name === undefined ? undefined : `the ${name} property`;
+  const named = written ?? keyed;
+  if (named !== undefined && REFLECTIVE_NAMES.has(named)) return named === "Reflect" ? "Reflect" : `the ${named} property`;
+  if (written === undefined && keyed === undefined && ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
+  return undefined;
 }
 
 /**
@@ -241,6 +260,8 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
     }
     // A `"URL"` key names the property without naming a binding, wherever it is written: `globalThis["URL"]`,
     // `(0, globalThis)["URL"]`, a template key, an object's computed key and a destructuring target all land here.
+    // A key written as a plain name (`{ URL: u } = globalThis`) needs no rule of its own: the identifier rule above
+    // refuses that same `URL` wherever it appears.
     if (propertyKey(node) === "URL") {
       problems.push(`${at(node)}: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound`);
     }
