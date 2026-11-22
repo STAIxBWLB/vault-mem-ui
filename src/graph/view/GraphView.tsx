@@ -199,16 +199,17 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
     else if (key === "Enter" && state.selectedId) openNote(state.selectedId);
     else if (key === "l" && state.selectedId) store.openLocal(state.selectedId);
     else if (key === "p" && state.selectedId) store.pathTo(state.selectedId);
-    else if (key === "Escape") { store.pathTo(null); store.openLocal(null); store.select(null); }
+    else if (key === "Escape") { store.pathTo(null); if (state.mode === "chains") store.clearChainFocus(); else { store.openLocal(null); store.select(null); } }
     else return;
     event.preventDefault();
     const id = store.getState().selectedId;
     if (id && key.startsWith("Arrow")) canvasRef.current?.focusNode(id);
   };
-  const openNote = (id: string) => {
+  const openNote = useCallback((id: string) => {
     const node = model.nodes.find((n) => n.id === id);
     if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
-  };
+  }, [model, navigate, params]);
+  const focusChain = useCallback((ids: string[]) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }, [store]);
 
   return (
     <section className="vmem-graph" aria-label="Vault graph">
@@ -238,7 +239,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         onKeyDown={onKey}
       />
       <aside className="vmem-graph-sidebar" aria-label="Graph details">
-        {state.mode === "chains" && <GraphChainsPanel state={state} hasSupersedes={hasSupersedes} focus={(ids) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }} open={openNote} />}
+        {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} focus={focusChain} open={openNote} />}
         <GraphFilterPanel state={state} store={store} />
         <GraphLegend state={state} themeKey={themeKey} />
         <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />

@@ -145,6 +145,9 @@ describe("GraphPanel", () => {
     expect(fake.cameraMoves.at(-1)).toMatchObject({ x: (Number(first.x) + Number(second.x)) / 2, y: (Number(first.y) + Number(second.y)) / 2 });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Open First")!.click(); });
     expect(opened).toEqual([{ panel: "note", params: { path: "notes/first.md" } }]);
+    await act(async () => { container.querySelector(".vmem-graph-canvas")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); });
+    expect(container.querySelector('[aria-label="Decision chains"]')).not.toBeNull();
+    expect(focus.getAttribute("aria-pressed")).toBe("false");
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Global view")!.click(); });
     expect(container.querySelector('[aria-label="Decision chains"]')).toBeNull();
   });

@@ -2,7 +2,34 @@ import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildGraphModel } from "../../../src/graph/model";
 import { createGraphViewStore } from "../../../src/graph/view/state";
-import { GraphFilterPanel, GraphInspector, GraphLegend } from "../../../src/graph/view/SidePanels";
+import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphLegend } from "../../../src/graph/view/SidePanels";
+
+test("chain and unlinked lists are capped with counts", () => {
+  const nodes = Array.from({ length: 162 }, (_, i) => ({ id: `n${i}`, label: `Node ${i}`, relPath: `notes/n${i}.md`, type: "decision" }));
+  const edges = Array.from({ length: 51 }, (_, i) => ({ source: `n${i * 2}`, target: `n${i * 2 + 1}`, relation: "supersedes", fromFrontmatter: true }));
+  const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains");
+  const state = store.getState();
+  const markup = renderToStaticMarkup(<GraphChainsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
+  expect(markup).toContain("Showing 50 of 51 chains");
+  expect(markup).toContain("Showing 50 of 60 unlinked decisions");
+  expect((markup.match(/Focus chain:/g) ?? []).length).toBe(50);
+  expect((markup.match(/>Focus Node/g) ?? []).length).toBe(50);
+});
+
+test("search-hidden members remain in the chain and are counted", () => {
+  const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision", domain: id === "a" ? "x" : "y" }));
+  const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: source!, target: target!, relation: "supersedes", fromFrontmatter: true }));
+  const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("A");
+  const state = store.getState();
+  const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
+  expect(markup).toContain("2 of 4 visible");
+  expect(markup).toContain("Open D");
+  store.setSearch(""); store.setProfile({ ...store.getState().profile, domains: ["x"] });
+  const filtered = store.getState();
+  const filteredMarkup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={filtered.derived.visibleNodeIds} chainFocusIds={filtered.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
+  expect(filteredMarkup).toContain("1 of 4 visible");
+  expect(filteredMarkup).not.toContain("Unlinked decisions");
+});
 
 const model = buildGraphModel({ nodes: [
   { id: "a", label: "Alpha", relPath: "notes/a.md", type: "insight", domain: "research" },

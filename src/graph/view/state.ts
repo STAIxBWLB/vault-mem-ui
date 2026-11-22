@@ -62,6 +62,7 @@ export interface GraphViewStore {
   openLocal(id: string | null, depth?: 1 | 2 | 3): void;
   setMode(mode: "global" | "chains"): void;
   focusChain(ids: string[]): void;
+  clearChainFocus(): void;
   /** First call picks the source, second finds the path; a call with null clears it. */
   pathTo(id: string | null): void;
   togglePin(id: string): void;
@@ -128,12 +129,13 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     const selectedId = has(state.selectedId) ? state.selectedId : null;
     const hoverId = has(state.hoverId) ? state.hoverId : null;
     const focusId = has(state.focusId) ? state.focusId : null;
+    const chainFocusIds = [...state.chainFocusIds].every(has) ? state.chainFocusIds : new Set([...state.chainFocusIds].filter(has));
     const source = state.pathSourceId, target = state.pathTargetId;
     if (!has(source) || (target !== null && !has(target))) {
-      return { derived, selectedId, hoverId, focusId, chainFocusIds: new Set([...state.chainFocusIds].filter((id) => has(id))), pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
+      return { derived, selectedId, hoverId, focusId, chainFocusIds, pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
     }
     const path = source && target ? shortestPath(derived.visibleModel, source, target) : null;
-    return { derived, selectedId, hoverId, focusId, chainFocusIds: new Set([...state.chainFocusIds].filter((id) => has(id))), pathSourceId: source, pathTargetId: target,
+    return { derived, selectedId, hoverId, focusId, chainFocusIds, pathSourceId: source, pathTargetId: target,
       path, pathMissing: target !== null && path === null };
   };
 
@@ -160,6 +162,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       if (!visibleIds.length) return;
       set({ chainFocusIds: new Set(visibleIds), selectedId: visibleIds[0]!, focusId: visibleIds[0]! });
     },
+    clearChainFocus() { set({ chainFocusIds: new Set(), selectedId: null, focusId: null }); },
     pathTo(id) {
       if (id === null) return set({ pathSourceId: null, pathTargetId: null, path: null, pathMissing: false });
       if (!known(id) || !visible(id)) return;

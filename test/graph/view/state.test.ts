@@ -67,15 +67,22 @@ describe("graph view store", () => {
       { id: "n", label: "Other", relPath: "notes/n.md", type: "insight" },
     ], edges: [
       { source: "d1", target: "d2", relation: "supersedes", fromFrontmatter: true },
+      { source: "d1", target: "d2", relation: "wiki_link", fromFrontmatter: false },
       { source: "d2", target: "n", relation: "wiki_link", fromFrontmatter: false },
     ] });
     const store = createGraphViewStore(chainModel);
     store.setMode("chains");
     expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["d1", "d2", "d3"]);
     expect(store.getState().derived.visibleModel.edges.map((edge) => edge.relation)).toEqual(["supersedes"]);
+    const unfocused = store.getState().chainFocusIds;
+    store.setProfile({ ...store.getState().profile });
+    expect(store.getState().chainFocusIds).toBe(unfocused);
     store.focusChain(["d1", "d2"]);
     expect(store.getState().chainFocusIds).toEqual(new Set(["d1", "d2"]));
     expect(store.getState().selectedId).toBe("d1");
+    store.setSearch("Solo");
+    expect(store.getState().chainFocusIds.size).toBe(0);
+    store.setSearch("");
     store.setMode("global");
     expect(store.getState().derived.visibleNodeIds.size).toBe(4);
     expect(store.getState().chainFocusIds.size).toBe(0);

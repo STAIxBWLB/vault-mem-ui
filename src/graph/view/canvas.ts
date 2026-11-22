@@ -167,7 +167,7 @@ export function mountGraphCanvas(
       const focus = s.selectedId;
       const touchesFocus = focus !== null && (src === focus || dst === focus);
       // LOD: on a reduced view keep a stride sample, but never drop edges the person is looking at.
-      if (s.lod.edgeStride > 1 && !onPath && !onChain && !hovered && !touchesFocus && (data.index as number) % s.lod.edgeStride !== 0) {
+      if (s.mode !== "chains" && s.lod.edgeStride > 1 && !onPath && !hovered && !touchesFocus && (data.index as number) % s.lod.edgeStride !== 0) {
         return { ...data, hidden: true };
       }
       if (onPath || onChain || hovered || touchesFocus) return { ...data, color: theme.accent, size: Math.max(1.4, data.size as number) };
