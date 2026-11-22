@@ -55,6 +55,19 @@ test("a graph reply carries the provider's declared actions, and other panels do
     .toMatchObject({ error: expect.stringMatching(/no selected vault/), capabilities: { actions: declared } });
 });
 
+test("a cursor stub keeps only its own keys, and a continuation page carries no declaration", async () => {
+  const declared = ["link"];
+  // acon's shell counts an unchanged poll as `changed` + `cursor` and nothing else; a third key makes it new data.
+  const stub = await graphAwareSnapshot(async () => ({ changed: false, cursor: 7 }), declared)({ panel: "graph", after: 7 });
+  expect(stub).toEqual({ changed: false, cursor: 7 });
+  expect(Object.keys(stub)).toEqual(["changed", "cursor"]);
+  // A continuation page is read only by the assembler, which takes the declaration from the first page.
+  const page = await graphAwareSnapshot(async () => ({ schema: 1, kind: "edges", offset: 0, count: 1, next: null, cursor: 9 }), declared)({ panel: "graph", after: 0, page: "edge-page" });
+  expect("capabilities" in page).toBe(false);
+  expect(await graphAwareSnapshot(async () => ({ schema: 1, kind: "nodes", offset: 0, count: 1, next: null, cursor: 9 }), declared)({ panel: "graph", after: 0 }))
+    .toMatchObject({ capabilities: { actions: declared } });
+});
+
 test("graphProvider forwards every member and stays a valid acon provider", async () => {
   const calls: string[] = [];
   const base: ConsoleProvider = {

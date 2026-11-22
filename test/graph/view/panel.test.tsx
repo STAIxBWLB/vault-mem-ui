@@ -554,6 +554,21 @@ describe("link authoring", () => {
     expect(propose()).toBeUndefined();
   });
 
+  test("choosing another note starts the link form empty", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const nodes = ["a", "b", "c"].map((id) => ({ id, label: id.toUpperCase(), relPath: `notes/${id}.md` }));
+    await mount({ graph: { nodes, edges: [] }, capabilities: { actions: ["link"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    await choose("#vmem-graph-link-target", "b");
+    expect(container.querySelector<HTMLSelectElement>("#vmem-graph-link-target")!.value).toBe("b");
+    await act(async () => fake.handlers.get("clickNode")!({ node: "c" }));
+    // C is another note, so the form starts again instead of proposing C to the target picked while A was selected.
+    expect(container.querySelector<HTMLSelectElement>("#vmem-graph-link-target")!.value).toBe("");
+    expect(propose()!.disabled).toBe(true);
+  });
+
   test("a large graph lists 200 targets and says how to reach the rest", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });

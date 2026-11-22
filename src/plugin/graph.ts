@@ -33,7 +33,12 @@ function isUnknownGraphPanel(reply: Record<string, unknown>): boolean {
  *
  *  A graph reply also carries the provider's declared `capabilities.actions`, because neither host hands the manifest
  *  to the panel (`ConsoleHost` has no such member) and the graph's link control may only appear when the provider
- *  declares `link`. `actions` is the same list the manifest declares: the provider's own action vocabulary. */
+ *  declares `link`. `actions` is the same list the manifest declares: the provider's own action vocabulary.
+ *
+ *  Two replies are left exactly as the provider sent them. A `changed: false` cursor stub must keep only its own keys,
+ *  because acon's shell counts an unchanged poll by them (`shell/shell.js` `pollPanel`); with a third key it would push
+ *  the stub as new data and cache it, replacing the panel's graph. A continuation page needs no declaration either:
+ *  the assembler reads it from the first page, which is not a `page` request. */
 export function graphAwareSnapshot(snapshot: ConsoleProvider["snapshot"], actions: readonly string[] = []): ConsoleProvider["snapshot"] {
   const capabilities = { actions: [...actions] };
   return async (input) => {
@@ -45,7 +50,9 @@ export function graphAwareSnapshot(snapshot: ConsoleProvider["snapshot"], action
       if (error instanceof Error && /unknown panel/i.test(error.message)) return { graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities };
       throw error;
     }
-    return isUnknownGraphPanel(reply) ? { graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities } : { ...reply, capabilities };
+    if (isUnknownGraphPanel(reply)) return { graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities };
+    if (input.page !== undefined || reply.changed === false) return reply;
+    return { ...reply, capabilities };
   };
 }
 

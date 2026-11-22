@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { createFakeHost } from "../../src/client/fake.ts";
 import { createStore } from "../../src/client/store.ts";
 import { linkAction } from "../../src/client/write.ts";
-import type { ActionResult } from "../../src/client/host.ts";
+import type { ActionResult, SnapshotReply } from "../../src/client/host.ts";
 import type { GraphInput } from "../../src/graph/types.ts";
 
 const totals = { nodes: 2, edges: 1, placeholders: 0, placeholdersOmitted: 0 };
@@ -113,6 +113,53 @@ test("a host that owns the confirmation also reloads the graph from its first pa
   await Bun.sleep(0);
   expect(host.calls.snapshot.at(-2)!.after).toBeUndefined();
   expect((store.getState().reply?.graph as GraphInput).edges).toHaveLength(1);
+});
+
+test("a cursor stub that supersedes the post-write read keeps the demand for the first page", async () => {
+  // Near-acon: the write is done, its first-page read is in flight, and a poll's `changed: false` stub arrives as the
+  // newest answer. The stub carries no graph, so the next refresh still has to read the graph from its first page.
+  let linked = false;
+  let hold = false;
+  let release: ((page: SnapshotReply) => void) | null = null;
+  const host = createFakeHost();
+  host.snapshot = async (input) => {
+    host.calls.snapshot.push(input);
+    const page = pages(linked, 10);
+    if (input.page) return page.edges;
+    if (input.after !== undefined) return { changed: false, cursor: 10 };
+    if (hold) { hold = false; return new Promise((resolve) => { release = resolve; }); }
+    return page.nodes;
+  };
+  host.action = async (input) => {
+    host.calls.action.push(input);
+    return input.confirmed ? { ok: true, message: "Link notes: done" } : { ok: false, needsConfirm: true, fingerprint: "sha256:link", verb: "Link notes", preview: ["link notes/alpha.md → notes/beta.md (supports), both directions"], changes: [], warnings: [] };
+  };
+  const store = createStore(host, { initialPanel: "graph" });
+  const stop = store.start();
+  await store.refresh();
+  await store.beginWrite(linkAction({ from: "notes/alpha.md", to: "notes/beta.md", relation: "supports", bidirectional: true }));
+
+  linked = true;
+  hold = true;
+  const confirming = store.confirmWriteNow();
+  await Bun.sleep(0);
+  expect(release).not.toBeNull();
+  // The stub is accepted while the first-page read is still in flight, so that read's assembly is dropped.
+  host.push({ changed: false, cursor: 10 });
+  await Bun.sleep(0);
+  release!(pages(true, 10).nodes);
+  await confirming;
+  await Bun.sleep(0);
+  expect(store.getState().reply?.graph).toBeDefined();
+
+  const before = host.calls.snapshot.length;
+  await store.refresh();
+  // The refresh's own first request, not a page the dropped assembly still fetched on its way out.
+  const request = host.calls.snapshot[before]!;
+  expect(request).toMatchObject({ panel: "graph" });
+  expect(request.after).toBeUndefined();
+  expect((store.getState().reply?.graph as GraphInput).edges).toHaveLength(1);
+  stop();
 });
 
 test("a cancelled preview sends nothing and keeps the graph as it was", async () => {
