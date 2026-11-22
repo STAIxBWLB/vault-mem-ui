@@ -14,6 +14,7 @@ import {
   type ToWorker,
 } from "../../src/graph/layout/protocol";
 import { createLayoutEngine, layoutGraphProblem } from "../../src/graph/layout/engine";
+import { withSemanticSprings } from "../../src/graph/layout/semantic";
 import { attachLayoutWorker, isLayoutWorkerContext } from "../../src/graph/layout/worker";
 import { startLayout, type CachedOnly, type LayoutHandle } from "../../src/graph/layout/client";
 
@@ -44,6 +45,18 @@ describe("constants", () => {
 });
 
 describe("engine", () => {
+  it("adds semantic springs with their scores as worker weights", () => {
+    const base = ring(8);
+    const weighted = withSemanticSprings(base, [{ source: 0, target: 4, score: 0.8 }]);
+    expect(weighted.sources.length).toBe(base.sources.length + 1);
+    expect(weighted.weights![base.sources.length]).toBeCloseTo(0.8);
+    expect([...weighted.weights!.slice(0, base.sources.length)]).toEqual(Array(base.sources.length).fill(1));
+    const weak = createLayoutEngine({ ...weighted, weights: Float32Array.from(weighted.weights!, (_, i) => i === base.sources.length ? 0.1 : 1) }, inferLayoutSettings(8));
+    const strong = createLayoutEngine(weighted, inferLayoutSettings(8));
+    weak.step(10); strong.step(10);
+    expect([...weak.positions()]).not.toEqual([...strong.positions()]);
+    expect(layoutGraphProblem({ ...weighted, weights: new Float32Array(0) })).toContain("weights");
+  });
   it("moves nodes with ForceAtlas2 and keeps them finite", () => {
     const g = ring(30);
     const engine = createLayoutEngine(g, inferLayoutSettings(30));

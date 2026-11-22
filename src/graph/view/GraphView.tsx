@@ -12,13 +12,16 @@ import type { SnapshotReply } from "../../client/host.ts";
 import { vaultParam, type ViewProps } from "../../client/views/common.ts";
 import { linkAction } from "../../client/write.ts";
 import { startLayout, type LayoutHandle } from "../layout/client";
+import { withSemanticSprings } from "../layout/semantic";
 import { buildGraphModel, type GraphModel } from "../model";
 import type { GraphInput } from "../types";
 import { hashPosition, loadCanvasDeps, mountGraphCanvas, type CanvasDeps, type GraphCanvasHandle } from "./canvas";
 import type { CacheStorage } from "./cache";
 import { LOD_EDGE_THRESHOLD } from "./lod";
-import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend, type LinkProposal } from "./SidePanels";
+import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend, type LinkProposal, type SimilarNotes } from "./SidePanels";
 import { createGraphViewStore, type GraphViewStore, type LayoutStatus } from "./state";
+import { OPEN_PROFILE } from "./state";
+import { assembleSemanticPages, type SemanticEdge } from "./graph-snapshot";
 
 /** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph).
  *  Edges to absent nodes are kept: buildGraphModel turns their endpoints into unresolved ghost nodes. */
@@ -79,7 +82,7 @@ export function declaredActions(reply: SnapshotReply): string[] {
   return Array.isArray(actions) ? actions.filter((action): action is string => typeof action === "string") : [];
 }
 
-export function GraphPanel({ reply, params, navigate, theme, beginWrite }: ViewProps) {
+export function GraphPanel({ reply, params, navigate, theme, beginWrite, graphSnapshot }: ViewProps) {
   // Every poll or push hands over a new reply object; only a changed graph may rebuild the view (and its worker).
   // Content is compared exactly (no hash, so no collisions); the generation counter is the React key.
   const parsed = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
@@ -96,10 +99,11 @@ export function GraphPanel({ reply, params, navigate, theme, beginWrite }: ViewP
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <>{Number((reply.graphStats as { placeholdersOmitted?: number } | undefined)?.placeholdersOmitted) > 0 && <Notice tone="warn">Some unresolved links were omitted by the provider because the graph reached its size limit.</Notice>}<GraphCanvasView key={generation} model={model} params={params} navigate={navigate} beginWrite={beginWrite} canLink={declaredActions(reply).includes("link")} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} /></>;
+  const stats = reply.graphStats as { revision?: string; vault?: string; placeholdersOmitted?: number } | undefined;
+  return <>{Number(stats?.placeholdersOmitted) > 0 && <Notice tone="warn">Some unresolved links were omitted by the provider because the graph reached its size limit.</Notice>}<GraphCanvasView key={`${generation}:${stats?.revision ?? ""}`} model={model} params={params} navigate={navigate} beginWrite={beginWrite} graphSnapshot={graphSnapshot} enrichment={reply.enrichment !== undefined} vault={stats?.vault} revision={stats?.revision} canLink={declaredActions(reply).includes("link")} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} /></>;
 }
 
-function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; beginWrite: ViewProps["beginWrite"]; canLink: boolean; themeKey: string }) {
+function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, enrichment, vault, revision, canLink, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; beginWrite: ViewProps["beginWrite"]; graphSnapshot: ViewProps["graphSnapshot"]; enrichment: boolean; vault?: string; revision?: string; canLink: boolean; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
   const hasSupersedes = useMemo(() => model.edges.some((edge) => edge.relation === "supersedes" || edge.relation === "superseded_by"), [model]);
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
@@ -110,8 +114,42 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
   const layoutRef = useRef<LayoutHandle | null>(null);
   const [canvasError, setCanvasError] = useState<string | null>(null);
   const [canvasReady, setCanvasReady] = useState(false);
+  const [semanticOn, setSemanticOn] = useState(false);
+  const [semanticEdges, setSemanticEdges] = useState<SemanticEdge[] | null>(null);
+  const [semanticError, setSemanticError] = useState<string | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [similar, setSimilar] = useState<{ path?: string; loading: boolean; hits: { path: string; title: string; score: number }[]; error?: string }>({ loading: false, hits: [] });
+  const selected = state.selectedId ? state.derived.visibleModel.nodes.find((n) => n.id === state.selectedId) ?? null : null;
 
   useEffect(() => {
+    let active = true;
+    setSemanticEdges(null); setSemanticLoading(false);
+    if (semanticOn && enrichment && vault && revision && graphSnapshot) {
+      setSemanticError(null); setSemanticLoading(true);
+      void assembleSemanticPages((input) => graphSnapshot(input), vault, revision, model.nodes.length, () => active)
+        .then((result) => { if (!active) return; setSemanticLoading(false); if ("error" in result) { setSemanticOn(false); setSemanticError(result.error); } else setSemanticEdges(result.edges); })
+        .catch((error: unknown) => { if (active) { setSemanticLoading(false); setSemanticOn(false); setSemanticError(error instanceof Error ? error.message : String(error)); } });
+    }
+    return () => { active = false; };
+  }, [semanticOn, enrichment, vault, revision, graphSnapshot, model]);
+
+  useEffect(() => {
+    let active = true;
+    if (!enrichment || !vault || !graphSnapshot || !selected?.relPath) { setSimilar({ loading: false, hits: [] }); return () => { active = false; }; }
+    const path = selected.relPath;
+    setSimilar({ path, loading: true, hits: [] });
+    void graphSnapshot({ vault, similar: path, limit: 10 }).then((reply) => {
+      if (!active) return;
+      if (typeof reply.error === "string") { setSimilar({ path, loading: false, hits: [], error: reply.error }); return; }
+      const hits = Array.isArray(reply.similar) ? reply.similar.filter((item): item is { path: string; title: string; score: number } => Boolean(item && typeof item === "object" && typeof item.path === "string" && typeof item.title === "string" && typeof item.score === "number" && Number.isFinite(item.score))) : [];
+      setSimilar({ path, loading: false, hits });
+    }).catch((error: unknown) => { if (active) setSimilar({ path, loading: false, hits: [], error: error instanceof Error ? error.message : String(error) }); });
+    return () => { active = false; };
+  }, [enrichment, vault, graphSnapshot, selected?.relPath]);
+
+  useEffect(() => {
+    setCanvasReady(false);
+    setCanvasError(null);
     let cancelled = false;
     let lastSave = 0;
     let initialFixed: Uint8Array = new Uint8Array(0);
@@ -130,7 +168,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
         }, deps);
         setCanvasReady(true);
         stage = "layout";
-        const initial = store.layoutGraph(hashPosition);
+        const initial = withSemanticSprings(store.layoutGraph(hashPosition), semanticEdges ?? []);
         initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
         return startLayout({
           moduleUrl: env.moduleUrl ?? "",
@@ -182,7 +220,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
       canvasRef.current?.destroy();
       canvasRef.current = null;
     };
-  }, [model, store]);
+  }, [model, store, semanticEdges]);
 
   useEffect(() => { canvasRef.current?.update(state); }, [state]);
   // The theme reaches the canvas through the container's computed tokens; re-read them after React applied the
@@ -200,7 +238,6 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     }
   };
 
-  const selected = state.selectedId ? state.derived.visibleModel.nodes.find((n) => n.id === state.selectedId) ?? null : null;
   const readVisiblePositions = (): GraphPositions => {
     const positions: Record<string, [number, number]> = Object.create(null);
     for (const node of state.derived.visibleModel.nodes) {
@@ -232,6 +269,13 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
   }, [model, navigate, params]);
   const focusChain = useCallback((ids: string[]) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }, [store]);
+  const similarNode = (path: string) => model.nodes.find((item) => item.relPath === (path.startsWith("notes/") ? path : `notes/${path}`));
+  const similarNotes: SimilarNotes | undefined = enrichment && selected?.relPath ? { ...(similar.path === selected.relPath ? similar : { loading: true, hits: [] }), select: (path) => {
+    const node = similarNode(path);
+    if (!node) return;
+    if (!store.getState().derived.visibleNodeIds.has(node.id)) { store.setMode("global"); store.setProfile({ ...OPEN_PROFILE }); store.setSearch(""); }
+    store.select(node.id); canvasRef.current?.focusNode(node.id);
+  }, contains: (path) => Boolean(similarNode(path)) } : undefined;
   let exportDisabledReason: string | undefined;
   if (canvasError) exportDisabledReason = "Export unavailable: the graph canvas could not start.";
   else if (!canvasReady) exportDisabledReason = "Export is available when the graph canvas is ready.";
@@ -249,6 +293,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>
+        {enrichment && graphSnapshot && <button type="button" className="vmem-button" aria-pressed={semanticOn} onClick={() => { setSemanticError(null); setSemanticOn(!semanticOn); }}>Semantic layout</button>}
         <button type="button" className="vmem-button" disabled={!selected} aria-pressed={state.pathSourceId !== null && !state.path} onClick={() => selected && store.pathTo(selected.id)}>
           {state.pathSourceId && !state.path ? "Path to…" : "Path from"}
         </button>
@@ -258,6 +303,8 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
       </div>
       <p className="vmem-sub vmem-graph-status" role="status">{layoutLabel(state.layout)}</p>
       {canvasError ? <Notice tone="err">{canvasError}</Notice> : null}
+      {semanticLoading && <p role="status">Loading semantic layout...</p>}
+      {semanticError && <><Notice tone="err">{semanticError}</Notice>{/restart from the first page/i.test(semanticError) && <button type="button" className="vmem-button" onClick={() => navigate("graph", vault ? { vault } : vaultParam(params))}>First page</button>}</>}
       {state.derived.focusMissing ? <Notice tone="warn">The focused note is not in this graph. Choose Global view.</Notice> : null}
       {state.pathMissing ? <Notice tone="warn">No path connects these notes. Pick another endpoint.</Notice> : null}
       <div
@@ -273,7 +320,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
         {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} search={state.search} focus={focusChain} open={openNote} />}
         <GraphFilterPanel state={state} store={store} />
         <GraphLegend state={state} themeKey={themeKey} />
-        <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} link={link} />
+        <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} link={link} similar={similarNotes} />
         <GraphInsightsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} select={(id) => store.select(id)} />
       </aside>
       <p id={selectedTextId} className="vmem-sub" aria-live="polite">

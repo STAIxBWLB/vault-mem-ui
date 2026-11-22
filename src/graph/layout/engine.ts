@@ -29,8 +29,10 @@ export function layoutGraphProblem(graph: LayoutGraph): string | null {
   if (!Number.isInteger(n) || n < 0) return `nodeCount must be a whole number, got ${n}`;
   if (graph.positions.length !== n * 2) return `positions has ${graph.positions.length} values, expected ${n * 2} (x,y per node)`;
   if (graph.sources.length !== graph.targets.length) return `sources (${graph.sources.length}) and targets (${graph.targets.length}) differ in length`;
+  if (graph.weights && graph.weights.length !== graph.sources.length) return `weights has ${graph.weights.length} values, expected ${graph.sources.length}`;
   for (let i = 0; i < graph.sources.length; i += 1) {
     if (graph.sources[i]! >= n || graph.targets[i]! >= n) return `edge ${i} points at node ${Math.max(graph.sources[i]!, graph.targets[i]!)}, but there are only ${n} nodes`;
+    if (graph.weights && (!Number.isFinite(graph.weights[i]!) || graph.weights[i]! < 0)) return `edge ${i} has an invalid weight`;
   }
   if (graph.sizes && graph.sizes.length !== n) return `sizes has ${graph.sizes.length} values, expected ${n}`;
   if (graph.fixed && graph.fixed.length !== n) return `fixed has ${graph.fixed.length} values, expected ${n}`;
@@ -60,7 +62,7 @@ export function createLayoutEngine(graph: LayoutGraph, settings: ForceAtlas2Sett
     nodes[tj + 6] += 1;
     edges[e * PPE] = sj;
     edges[e * PPE + 1] = tj;
-    edges[e * PPE + 2] = 1;
+    edges[e * PPE + 2] = graph.weights?.[e] ?? 1;
   }
   const merged = { ...DEFAULTS, ...settings };
   let iterations = 0;

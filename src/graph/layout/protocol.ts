@@ -45,6 +45,8 @@ export interface LayoutGraph {
   positions: Float32Array;
   sources: Uint32Array;
   targets: Uint32Array;
+  /** Optional edge weights; absent means every edge has weight 1. */
+  weights?: Float32Array;
   /** Optional per-node size (adjustSizes) and pinned flag. */
   sizes?: Float32Array;
   fixed?: Uint8Array;

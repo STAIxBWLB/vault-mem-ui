@@ -31,6 +31,7 @@ export interface ClientStore {
   show(panel: string, params?: Record<string, string>): void;
   navigate(panel: string, params?: Record<string, string>): void;
   refresh(): Promise<void>;
+  graphSnapshot(params: Record<string, unknown>): Promise<SnapshotReply>;
   setTheme(theme: ThemePref): void;
   setWrite(state: WriteState): void;
   beginWrite(input: ActionInput): Promise<void>;
@@ -100,6 +101,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
+    graphSnapshot(params) { return host.snapshot({ ...params, panel: "graph" }); },
     show(panel, params = {}) {
       // A panel the browser stored, or an unknown id from a link, falls back to the first panel.
       const next = panel.trim() || "overview";

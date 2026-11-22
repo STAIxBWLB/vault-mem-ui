@@ -7,6 +7,7 @@ export interface ViewProps {
   params: Record<string, string>;
   navigate(panel: string, params?: Record<string, string>): void;
   beginWrite(input: ActionInput): void;
+  graphSnapshot?(params: Record<string, unknown>): Promise<SnapshotReply>;
   /** The resolved theme; views that paint outside CSS (the graph canvas) redraw when it changes. */
   theme?: Theme;
 }

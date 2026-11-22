@@ -6,6 +6,8 @@ section. `## [Unreleased]` holds the work that no release has shipped yet.
 
 ## [Unreleased]
 
+- Add similar notes and an optional weighted semantic graph layout for enrichment-enabled vaults.
+
 ## [0.1.0] - 2026-11-22
 
 Requires `@staix/vault-mem` 0.13.1.
