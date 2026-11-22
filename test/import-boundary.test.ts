@@ -24,20 +24,34 @@ const bad = [
   'import {Database} from "bun:sqlite"',
   String.raw`import x from "../vault-mem\\src\\private"`,
   'await import(name)',
-  // A module load that names no import: both hand back the module object, so both answer to the same list.
+  // A module load that names no import: every one of these hands back the module object, so each answers to the same
+  // list, whether the member is written with a dot, with a string key, or read off the global object.
   'process.getBuiltinModule("node:fs")',
   'process.getBuiltinModule("bun:sqlite")',
   'import.meta.require("node:fs")',
   'import.meta.require("@staix/vault-mem/src/private")',
   'process.getBuiltinModule(name)',
   'import.meta.require(name)',
+  'createRequire(import.meta.url)("node:fs")',
+  'createRequire(import.meta.url)(name)',
+  'import { createRequire } from "node:module"',
+  'import { createRequire } from "module"',
+  'globalThis.process.getBuiltinModule("node:fs")',
+  'module.require("node:fs")',
+  'module.require(name)',
+  'process["getBuiltinModule"]("node:fs")',
+  'module["require"]("node:fs")',
 ];
 
 test("boundary catches prohibited access", () => {
   for (const source of bad) expect(boundaryViolations(source, "example.ts")).not.toEqual([]);
   expect(boundaryViolations('import x from "@staix/vault-mem/ui-plugin"', "example.ts")).toEqual([]);
   // What is refused is the load, not the name: a builtin this list allows and an ordinary process read both pass.
-  for (const allowed of ['const path = process.getBuiltinModule("node:path");', "const flag = process.env.CI;"]) {
+  for (const allowed of [
+    'const path = process.getBuiltinModule("node:path");',
+    'const path = createRequire(import.meta.url)("node:path");',
+    "const flag = process.env.CI;",
+  ]) {
     expect(boundaryViolations(allowed, "example.ts")).toEqual([]);
   }
 });
@@ -78,11 +92,23 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nrun(readFileSync)', "a reference passed as an argument"],
   // The global URL again, through a key or a reflective writer instead of an identifier. Each line keeps the two
   // legal reads the file is allowed, so the only thing left to fail on is the write above it.
-  ['import { readFileSync } from "node:fs";\nglobalThis["URL"] = class { constructor() { this.href = "" } };\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a string-keyed write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nglobalThis["URL"] = class { constructor() { this.href = "" } };\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed write to the global URL"],
   ['import { readFileSync } from "node:fs";\nObject.defineProperty(globalThis, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperty write to the global URL"],
   ['import { readFileSync } from "node:fs";\nReflect.set(globalThis, "URL", class {});\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a Reflect.set write to the global URL"],
   ['import { readFileSync } from "node:fs";\nglobalThis[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed write to an unknown global key"],
   ['import { readFileSync } from "node:fs";\nObject.assign(globalThis, { ["URL"]: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign of a computed global key"],
+  // The same global reached another way: parenthesized, through a destructuring target, through its own `globalThis`
+  // property, and under the names `self` and `window` answer to. Each is the same write, so each is refused the same.
+  ['import { readFileSync } from "node:fs";\n(globalThis)["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a parenthesized write to the global URL"],
+  ['import { readFileSync } from "node:fs";\n[globalThis["URL"]] = [class {}];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nObject["defineProperty"](globalThis, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed defineProperty on the global URL"],
+  ['import { readFileSync } from "node:fs";\nglobalThis.globalThis["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through globalThis.globalThis"],
+  ['import { readFileSync } from "node:fs";\nself["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through self"],
+  ['import { readFileSync } from "node:fs";\nwindow["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through window"],
+  ['import { readFileSync } from "node:fs";\n[self["URL"]] = [class {}];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring write to the global URL through self"],
+  ['import { readFileSync } from "node:fs";\n[window["URL"]] = [class {}];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring write to the global URL through window"],
+  ['import { readFileSync } from "node:fs";\nObject["defineProperty"](self, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed defineProperty on the global URL through self"],
+  ['import { readFileSync } from "node:fs";\nReflect["set"](window, "URL", class {});\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed Reflect.set on the global URL through window"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
@@ -97,6 +123,17 @@ test("the panel asset reader may only read its two fixed dist paths", () => {
 
 test("the same sources are violations outside the asset reader", () => {
   for (const source of allows) expect(boundaryViolations(source, "src/client/panel.tsx")).not.toEqual([]);
+});
+
+// `globalThis[key] = ...` is not a string key: the key is an expression this check cannot read, and the message has to
+// say that rather than name a form the source does not use.
+test("a global key the check cannot read is described as computed", () => {
+  const found = boundaryViolations(
+    'import { readFileSync } from "node:fs";\nglobalThis[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")',
+    reader,
+  );
+  expect(found.filter((problem) => problem.includes("to a computed global key"))).not.toEqual([]);
+  expect(found.filter((problem) => problem.includes("string-keyed"))).toEqual([]);
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {
