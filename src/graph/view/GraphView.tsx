@@ -240,7 +240,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     <section className="vmem-graph" aria-label="Vault graph">
       <div className="vmem-graph-bar" role="toolbar" aria-label="Graph controls">
         <span className="vmem-sub">{state.derived.visibleModel.nodes.length} notes · {state.derived.visibleModel.edges.length} links{model.edges.length > LOD_EDGE_THRESHOLD ? " · large graph, detail reduced while moving" : ""}</span>
-        <GraphExportButton model={state.derived.visibleModel} positions={readVisiblePositions} disabled={!canvasReady} />
+        <GraphExportButton model={state.derived.visibleModel} positions={readVisiblePositions} disabledReason={canvasError ? "Export unavailable: the graph canvas could not start." : !canvasReady ? "Export is available when the graph canvas is ready." : !state.derived.visibleModel.nodes.length ? "No nodes match; clear filters or search to export." : undefined} />
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>

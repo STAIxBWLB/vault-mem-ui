@@ -148,9 +148,30 @@ describe("GraphPanel", () => {
     await mount({ graph });
     const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
     expect(button.disabled).toBe(true);
-    expect(button.title).toContain("not ready");
+    expect(container.textContent).toContain("Export is available when the graph canvas is ready");
     await act(async () => { resolve(fake.deps); }); await flush();
     expect(button.disabled).toBe(false);
+  });
+
+  test("an empty filtered graph disables export with a visible next step", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph });
+    const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onChange(event: { currentTarget: HTMLInputElement }): void }>)[propsKey]!;
+    await act(async () => { input.value = "no match"; props.onChange({ currentTarget: input }); });
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
+    expect(button.disabled).toBe(true);
+    expect(container.textContent).toContain("No nodes match; clear filters or search to export.");
+  });
+
+  test("a failed canvas visibly explains why export is unavailable", async () => {
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => { throw new Error("no canvas"); } });
+    await mount({ graph }); await flush();
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
+    expect(button.disabled).toBe(true);
+    expect(container.textContent).toContain("Export unavailable: the graph canvas could not start.");
   });
   test("search updates which chains are listed after the panel is mounted", async () => {
     const fake = fakeCanvas();

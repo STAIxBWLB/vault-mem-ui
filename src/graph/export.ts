@@ -34,7 +34,8 @@ const raw = graph.nodes.map((node, i) => node.position || [Math.cos(i * 2.4) * M
 let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 for (const [x, y] of raw) { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
 const span = Math.max(maxX - minX, maxY - minY, 1), scale = 520 / span;
-graph.nodes.forEach((node, i) => points.set(node.id, [500 + (raw[i][0] - (minX + maxX) / 2) * scale, 300 + (raw[i][1] - (minY + maxY) / 2) * scale]));
+// Graph coordinates use y-up, while a 2D canvas uses y-down.
+graph.nodes.forEach((node, i) => points.set(node.id, [500 + (raw[i][0] - (minX + maxX) / 2) * scale, 300 - (raw[i][1] - (minY + maxY) / 2) * scale]));
 ctx.strokeStyle = "#aaa";
 for (const edge of graph.edges) { const a = points.get(edge.source), b = points.get(edge.target); if (!a || !b) continue; ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); }
 ctx.fillStyle = "#2458a2"; ctx.font = "12px sans-serif";
