@@ -35,6 +35,17 @@ describe("parseMarkdown", () => {
     expect(parseMarkdown("a | b\n---")[0]?.kind).toBe("heading");
   });
 
+  test("ATX heading closing markers and unmatched backtick suffixes keep their meaning", () => {
+    expect(html("# title ###")).toContain(">title</h2>");
+    expect(html("# title###")).toContain(">title###</h2>");
+    expect(html("# foo # ")).toContain(">foo #</h2>");
+    for (const input of ["# #", "#  #", "#    #", "# \t#", "##\t #", " #  # "]) {
+      const depth = input.trimStart().startsWith("##") ? 2 : 1;
+      expect(parseMarkdown(input)[0]).toEqual({ kind: "heading", depth, children: [{ kind: "text", text: "#" }] });
+    }
+    expect(parseInline("``x`y`")).toEqual([{ kind: "text", text: "`" }, { kind: "code", text: "x" }, { kind: "text", text: "y`" }]);
+  });
+
   test("a list keeps its kind, its start and its task state", () => {
     const bullet = parseMarkdown("- a\n- b")[0];
     expect(bullet?.kind === "list" && bullet.ordered).toBe(false);
@@ -96,6 +107,7 @@ describe("Markdown", () => {
 
   test("a soft line break is a space and a hard one is a br", () => {
     expect(html("one\ntwo")).toContain("one two");
+    expect(html("one\ntwo")).not.toContain("<br/>");
     expect(html("one  \ntwo")).toContain("<br/>");
   });
 
@@ -132,6 +144,14 @@ describe("Markdown", () => {
     expect(markup).toContain('data-align="left"');
     expect(markup).toContain('data-align="right"');
     expect(markup.match(/<td /g)?.length).toBe(2);
+  });
+
+  test("a table row wider than the header renders only the header's columns", () => {
+    const markup = html("| a | b |\n| --- | --- |\n| one | two | extra |");
+    expect(markup.match(/<td\b/g)).toHaveLength(2);
+    expect(markup).toContain("one");
+    expect(markup).toContain("two");
+    expect(markup).not.toContain("extra");
   });
 });
 
@@ -471,6 +491,12 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       'const overlapStart = Date.now();',
       'parseInline("[a](".repeat(12000) + ")".repeat(12000));',
       'if (Date.now() - overlapStart > 1000) throw new Error("overlapping destinations took " + (Date.now() - overlapStart) + " ms");',
+      // Median of seven warmed runs makes the 50 ms bound less sensitive to a single scheduler interruption.
+      'for (const [name, run] of [["heading", () => parseMarkdown("# x" + " ".repeat(16384) + "y")], ["heading line separator", () => parseMarkdown("# " + " ".repeat(65536) + " ")], ["heading paragraph separator", () => parseMarkdown("# " + " ".repeat(65536) + " ")], ["backticks", () => parseInline("`".repeat(16384))]]) {',
+      '  for (let i = 0; i < 3; i++) run();',
+      '  const times = []; for (let i = 0; i < 7; i++) { const start = performance.now(); run(); times.push(performance.now() - start); }',
+      '  times.sort((a, b) => a - b); if (times[3] >= 50) throw new Error(name + " took " + times[3] + " ms");',
+      '}',
       'const breakStart = Date.now();',
       'parseInline("a" + " ".repeat(8000) + "b\\n" + "x\\n".repeat(3000));',
       'if (Date.now() - breakStart > 1000) throw new Error("hard break scan took " + (Date.now() - breakStart) + " ms");',
