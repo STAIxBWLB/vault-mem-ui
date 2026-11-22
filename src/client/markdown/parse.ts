@@ -305,6 +305,9 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
   // to the end of the text: a note of many `[` and a single `]` re-read the same tail from each opening, which took 1.9 s
   // at 48 KB under V8 with the old guard (that guard only helped when no `]` existed at all).
   const pairs = text.includes("[") ? bracketPairs(text) : null;
+  const parens = pairs ? parenPairs(text) : null;
+  // Successful and rejected destinations may overlap; bound total substring decoding per inline pass.
+  const budget = { remaining: text.length * 4 };
   const lastWiki = text.lastIndexOf("]]");
   let buffer = "";
   const flush = () => {
@@ -346,7 +349,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
     }
     if (char === "!" && text[at + 1] === "[") {
       const span = (lastWiki >= at + 3 ? wikiSpan(text, at) : null) ??
-        (pairs ? bracketLink(text, at, true, depth, pairs) : null);
+        (pairs && parens ? bracketLink(text, at, true, depth, pairs, parens, budget) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -356,7 +359,7 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
     }
     if (char === "[" && links) {
       const span = (lastWiki >= at + 2 && text[at + 1] === "[" ? wikiSpan(text, at) : null) ??
-        (pairs ? bracketLink(text, at, false, depth, pairs) : null);
+        (pairs && parens ? bracketLink(text, at, false, depth, pairs, parens, budget) : null);
       if (span) {
         flush();
         out.push(span.node);
@@ -454,17 +457,32 @@ function bracketPairs(text: string): Int32Array {
   return pairs;
 }
 
-function bracketLink(text: string, at: number, image: boolean, depth: number, pairs: Int32Array): Span | null {
+/** Match unescaped parentheses in one pass; destinations never cross a newline. */
+function parenPairs(text: string): Int32Array {
+  const pairs = new Int32Array(text.length).fill(-1);
+  const stack: number[] = [];
+  for (let at = 0; at < text.length; at += 1) {
+    if (text[at] === "\\") { at += 1; continue; }
+    if (text[at] === "\n") { stack.length = 0; continue; }
+    if (text[at] === "(") stack.push(at);
+    else if (text[at] === ")" && stack.length) pairs[stack.pop()!] = at;
+  }
+  return pairs;
+}
+
+function bracketLink(text: string, at: number, image: boolean, depth: number, pairs: Int32Array, parens: Int32Array, budget: { remaining: number }): Span | null {
   const bracket = at + (image ? 1 : 0);
   const open = bracket + 1;
   const close = pairs[bracket]!;
   if (close < 0 || text[close + 1] !== "(") return null;
+  const end = parens[close + 1]!;
+  if (end < 0 || end - open > budget.remaining) return null;
+  budget.remaining -= end - open;
   const label = text.slice(open, close);
-  const inside = destination(text, close + 1);
+  const inside = destination(text, close + 1, end);
   if (!inside) return null;
   const target = linkTarget(inside.dest);
   if (!target) return null;
-  const end = inside.end;
   // An image target is shown, not fetched, so it is kept as written; a link target has to pass the scheme check.
   if (image) return { node: { kind: "image", alt: label.trim(), src: target }, end: end + 1 };
   const href = safeHref(target);
@@ -477,11 +495,11 @@ function bracketLink(text: string, at: number, image: boolean, depth: number, pa
 }
 
 /** The destination of `(…)` starting at `open`, read the way a link target is, and the index of its closing paren. */
-function destination(text: string, open: number): { dest: string; end: number } | null {
+function destination(text: string, open: number, closing: number): { dest: string; end: number } | null {
   let dest = "";
   let parens = 1;
   let end = open + 1;
-  for (; end < text.length; end += 1) {
+  for (; end <= closing; end += 1) {
     const char = text[end]!;
     if (char === "\\") {
       dest += text[end + 1] ?? "";

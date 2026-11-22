@@ -464,6 +464,10 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       "const before = Date.now();",
       "parseInline(partial);",
       'if (Date.now() - before > 1000) throw new Error("one close took " + (Date.now() - before) + " ms");',
+      'const destinations = "[a](".repeat(12000);',
+      "const destinationStart = Date.now();",
+      "parseInline(destinations);",
+      'if (Date.now() - destinationStart > 1000) throw new Error("unclosed destinations took " + (Date.now() - destinationStart) + " ms");',
       'console.log("ok");',
     ].join("\n");
     const run = Bun.spawnSync([Bun.which("node")!, "--input-type=module", "-e", script]);
@@ -480,6 +484,12 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
 });
 
 describe("a pathological note takes bounded work", () => {
+  test("unterminated destinations stay literal while nested and escaped parentheses parse", () => {
+    expect(parseInline("[a](".repeat(12000)).map((node) => node.kind)).toEqual(["text"]);
+    expect(parseInline("[nested](https://example.test/a(b))")[0]).toMatchObject({ kind: "link", href: "https://example.test/a(b)" });
+    expect(parseInline("[escaped](https://example.test/a\\)b)")[0]).toMatchObject({ kind: "link", href: "https://example.test/a)b" });
+    expect(parseInline("[broken](x\n[good](https://example.test)").some((node) => node.kind === "link")).toBe(true);
+  });
   const took = (fn: () => void): number => {
     const start = performance.now();
     fn();
