@@ -9,6 +9,14 @@ import { vaultParam } from "./common.ts";
 /** Git's change letters as the words a person reads; anything else is shown as given. */
 const CHANGE_TEXT: Record<string, string> = { A: "added", M: "modified", D: "deleted", T: "type changed" };
 
+/**
+ * The picked pair travels in these params. Every navigation remounts this view, so a half-picked pair would be lost
+ * between two pages; vmem_history declares only vault, path, limit and cursor, and the provider's forward() copies
+ * just declared properties, so the provider never sees these two.
+ */
+const PICK_FROM = "pickFrom";
+const PICK_TO = "pickTo";
+
 const short = (value: string): string => (value.length > 12 ? value.slice(0, 12) : value);
 
 export function HistoryView({ reply, params, navigate }: ViewProps) {
@@ -19,19 +27,26 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   const revisions = list<Record<string, unknown>>(history.revisions);
   const changed = list<Record<string, unknown>>(changes.changed);
   const error = str(reply.error);
-  // The picked pair lives here until both ends are chosen, because the provider refuses a half pair and would then
-  // answer no history at all, leaving nothing to pick the second end from.
-  const [pending, setPending] = useState({ from: str(params.from), to: str(params.to) });
-  // Another note starts a fresh pair; the pair a link carries is the one already shown.
-  const [seenPath, setSeenPath] = useState(path);
-  if (path !== seenPath) {
-    setSeenPath(path);
-    setPending({ from: str(params.from), to: str(params.to) });
-  }
-  const nav = (extra: Record<string, string>) =>
-    navigate("history", { ...(vault ? { vault } : {}), ...(path ? { path } : {}), ...extra });
+  const coverage = rec(history.coverage);
+  const reason = str(coverage.reason);
+  const incomplete = coverage.complete === false;
+  // `from`/`to` are the pair whose changes are on screen; the pick is what the person is still choosing, and it is
+  // read back from the params so a page turn does not throw away half of it.
+  const [pending, setPending] = useState({ from: str(params[PICK_FROM]) || str(params.from), to: str(params[PICK_TO]) || str(params.to) });
   const pick = (end: "from" | "to", revision: string) => setPending((pair) => ({ ...pair, [end]: revision }));
   const ready = pending.from !== "" && pending.to !== "" && pending.from !== pending.to;
+  const nav = (extra: Record<string, string>) =>
+    navigate("history", { ...(vault ? { vault } : {}), ...(path ? { path } : {}), ...extra });
+  const pickParams = (): Record<string, string> => ({
+    // An end that still matches the pair already in the params needs no second copy.
+    ...(pending.from && pending.from !== str(params.from) ? { [PICK_FROM]: pending.from } : {}),
+    ...(pending.to && pending.to !== str(params.to) ? { [PICK_TO]: pending.to } : {}),
+  });
+  // Changes paging stays on the pair that produced the list: an old changesCursor sent with a newer pick would page a
+  // list the person is no longer looking at. The pick rides along, so choosing a new pair survives a page turn too.
+  const shownFrom = str(changes.from);
+  const shownTo = str(changes.to);
+  const changesNav = (extra: Record<string, string>) => nav({ from: shownFrom, to: shownTo, ...pickParams(), ...extra });
   const historyMore = str(history.continuation);
   const changesMore = str(changes.continuation);
   const stop = str(history.stopReason);
@@ -39,6 +54,9 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   if (!path) {
     return <Empty title="No note selected" hint="Open a note, then choose History on that note." />;
   }
+  // A refusal (unknown vault, a cursor the provider no longer knows, a half pair) answers no history at all, and the
+  // refusal already names its cause and next step.
+  if (error && !reply.history) return <Notice tone="err">{error}</Notice>;
   return (
     <>
       <h1>History</h1>
@@ -46,7 +64,10 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
       <p className="vmem-sub">{path}</p>
       <section className="vmem-section" aria-label="Revisions">
         <h2 className="vmem-card-title">Revisions</h2>
-        {revisions.length === 0 ? <Empty title="No history" hint="This note has no commit yet, or the path is not in the vault's first-parent history." /> : null}
+        {incomplete && reason ? <Notice tone="warn">{reason}</Notice> : null}
+        {revisions.length === 0 && !incomplete ? (
+          <Empty title="No history" hint="This note has no commit yet, or the path is not in the vault's first-parent history." />
+        ) : null}
         <List
           label="Revisions"
           items={revisions.map((revision) => {
@@ -69,8 +90,13 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
           })}
         />
         <div className="vmem-bar">
+          {params.cursor ? (
+            <button type="button" className="vmem-button" onClick={() => nav({ ...pickParams() })}>
+              Newest revisions
+            </button>
+          ) : null}
           {historyMore ? (
-            <button type="button" className="vmem-button" onClick={() => nav({ cursor: historyMore, ...(pending.from && pending.to ? { from: pending.from, to: pending.to } : {}) })}>
+            <button type="button" className="vmem-button" onClick={() => nav({ cursor: historyMore, ...pickParams() })}>
               Older revisions
             </button>
           ) : null}
@@ -101,10 +127,10 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
             </button>
           ) : null}
         </div>
-        {changes.from && changes.to ? (
+        {shownFrom && shownTo ? (
           <>
             <p className="vmem-sub">
-              {changed.length} {changed.length === 1 ? "note" : "notes"} changed between {short(str(changes.from))} and {short(str(changes.to))}
+              {changed.length} {changed.length === 1 ? "note" : "notes"} changed between {short(shownFrom)} and {short(shownTo)}
               {changes.total !== undefined ? ` of ${str(changes.total)}` : ""}
             </p>
             <List
@@ -124,12 +150,12 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
             />
             <div className="vmem-bar">
               {params.changesCursor ? (
-                <button type="button" className="vmem-button" onClick={() => nav({ from: pending.from, to: pending.to })}>
+                <button type="button" className="vmem-button" onClick={() => changesNav({})}>
                   First page
                 </button>
               ) : null}
               {changesMore ? (
-                <button type="button" className="vmem-button" onClick={() => nav({ from: pending.from, to: pending.to, changesCursor: changesMore })}>
+                <button type="button" className="vmem-button" onClick={() => changesNav({ changesCursor: changesMore })}>
                   More changes
                 </button>
               ) : null}

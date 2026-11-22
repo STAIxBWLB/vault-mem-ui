@@ -170,6 +170,14 @@
   border-color: var(--vmem-danger);
 }
 
+/* A toggled button keeps its label and gains a filled state, so the chosen end of a pair is visible without reading
+   the line below it. */
+.vmem-button[aria-pressed="true"] {
+  border-color: var(--vmem-accent);
+  background: var(--vmem-accent);
+  color: var(--vmem-bg);
+}
+
 .vmem-button-primary {
   border-color: var(--vmem-accent);
   color: var(--vmem-accent);
