@@ -41,7 +41,7 @@ The inspector links the selected note to a second one through the provider's two
 
 ## Offline graph export
 
-The graph export produces one self-contained HTML file containing graph metadata and positions, without note bodies. The download component supports both `acon` and the standalone host; its graph-view integration awaits the provider snapshot adapter.
+The graph view exports nodes and links selected by the current filters, search and view mode as one self-contained HTML file containing graph metadata and positions, without note bodies. It includes links temporarily hidden by level of detail. It works in both `acon` and the standalone host. While layout is running, export captures the canvas positions at the moment of the click; the button is unavailable until the canvas is ready.
 
 ## Standalone host (vmem-ui)
 

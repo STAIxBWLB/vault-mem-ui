@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Empty, Notice } from "../../client/components.tsx";
+import { GraphExportButton } from "../../client/graph-export.tsx";
+import type { GraphPositions } from "../export.ts";
 import type { SnapshotReply } from "../../client/host.ts";
 import { vaultParam, type ViewProps } from "../../client/views/common.ts";
 import { linkAction } from "../../client/write.ts";
@@ -107,6 +109,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
   const canvasRef = useRef<GraphCanvasHandle | null>(null);
   const layoutRef = useRef<LayoutHandle | null>(null);
   const [canvasError, setCanvasError] = useState<string | null>(null);
+  const [canvasReady, setCanvasReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -125,6 +128,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
           onClick: (id) => store.select(id),
           onCamera: (ratio) => store.setCamera(ratio),
         }, deps);
+        setCanvasReady(true);
         stage = "layout";
         const initial = store.layoutGraph(hashPosition);
         initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
@@ -197,6 +201,14 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
   };
 
   const selected = state.selectedId ? state.derived.visibleModel.nodes.find((n) => n.id === state.selectedId) ?? null : null;
+  const readVisiblePositions = (): GraphPositions => {
+    const positions: Record<string, [number, number]> = Object.create(null);
+    for (const node of state.derived.visibleModel.nodes) {
+      const point = canvasRef.current?.positionOf(node.id);
+      if (point) positions[node.id] = point;
+    }
+    return positions;
+  };
   const running = state.layout.kind === "running";
   const paused = state.layout.kind === "paused";
 
@@ -228,6 +240,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     <section className="vmem-graph" aria-label="Vault graph">
       <div className="vmem-graph-bar" role="toolbar" aria-label="Graph controls">
         <span className="vmem-sub">{state.derived.visibleModel.nodes.length} notes · {state.derived.visibleModel.edges.length} links{model.edges.length > LOD_EDGE_THRESHOLD ? " · large graph, detail reduced while moving" : ""}</span>
+        <GraphExportButton model={state.derived.visibleModel} positions={readVisiblePositions} disabled={!canvasReady} />
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>

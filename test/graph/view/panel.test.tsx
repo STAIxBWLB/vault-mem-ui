@@ -4,7 +4,7 @@
  * the worker and Sigma down. happy-dom is registered here only.
  */
 
-import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -110,6 +110,48 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("visible graph export captures current positions while layout runs", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    let blob: Blob | undefined;
+    const create = spyOn(URL, "createObjectURL").mockImplementation((value) => { blob = value as Blob; return "blob:synthetic"; });
+    const click = spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    try {
+      const input = { ...graph, nodes: graph.nodes.map((node, i) => ({ ...node, domain: i < 2 ? "x" : "y", body: "SYNTHETIC_BODY_NOT_EXPORTED" })) };
+      await mount({ graph: input });
+      const worker = FakeWorker.last!;
+      await act(async () => { worker.emit({ type: "ready" } as FromWorker); }); await flush();
+      await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([1, 2, 3, 4, 5, 6]), iterations: 3 } as FromWorker); });
+      // A second batch arrives before the two-second cache save; export must read the live canvas, not the cache.
+      await act(async () => { worker.emit({ type: "positions", positions: new Float32Array([11, 12, 13, 14, 15, 16]), iterations: 4 } as FromWorker); });
+      const domains = [...container.querySelectorAll("fieldset")].find((fieldset) => fieldset.querySelector("legend")?.textContent === "Domains")!;
+      await act(async () => { [...domains.querySelectorAll("label")].find((label) => label.textContent?.includes("x ("))!.querySelector("input")!.click(); });
+      const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
+      expect(button.disabled).toBe(false);
+      expect(container.textContent).toContain("Laying out");
+      await act(async () => button.click());
+      expect(click).toHaveBeenCalledTimes(1);
+      const html = await blob!.text();
+      const packet = JSON.parse(html.match(/<script id="graph-data" type="application\/json">([^<]*)<\/script>/)![1]!);
+      const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0))));
+      expect(data.nodes.map((node: { id: string }) => node.id)).toEqual(["a", "b"]);
+      expect(data.nodes.map((node: { position: number[] }) => node.position)).toEqual([[11, 12], [13, 14]]);
+      expect(data.edges).toEqual([{ source: "a", target: "b", relation: "wiki_link" }]);
+      expect(html).not.toContain("SYNTHETIC_BODY_NOT_EXPORTED");
+      expect(JSON.stringify(data)).not.toContain("SYNTHETIC_BODY_NOT_EXPORTED");
+    } finally { create.mockRestore(); click.mockRestore(); }
+  });
+
+  test("visible graph export is disabled until the canvas is ready", async () => {
+    const fake = fakeCanvas(); let resolve!: (deps: CanvasDeps) => void;
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: () => new Promise((done) => { resolve = done; }) });
+    await mount({ graph });
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toContain("not ready");
+    await act(async () => { resolve(fake.deps); }); await flush();
+    expect(button.disabled).toBe(false);
+  });
   test("search updates which chains are listed after the panel is mounted", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });

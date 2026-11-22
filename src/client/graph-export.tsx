@@ -13,7 +13,7 @@ export function downloadGraphHtml(model: GraphModel, positions: GraphPositions):
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/** Placed by the graph view once the snapshot adapter supplies a model. */
-export function GraphExportButton({ model, positions }: { model: GraphModel; positions: GraphPositions }) {
-  return <button type="button" className="vmem-button" onClick={() => downloadGraphHtml(model, positions)}>Export HTML</button>;
+/** Read positions at the click, so a running layout exports its current canvas coordinates. */
+export function GraphExportButton({ model, positions, disabled = false }: { model: GraphModel; positions: GraphPositions | (() => GraphPositions); disabled?: boolean }) {
+  return <button type="button" className="vmem-button" disabled={disabled} title={disabled ? "Graph canvas is unavailable or not ready" : undefined} onClick={() => downloadGraphHtml(model, typeof positions === "function" ? positions() : positions)}>Export filtered graph HTML</button>;
 }
