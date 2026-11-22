@@ -37,6 +37,14 @@ function peel(node: ts.Expression): ts.Expression {
 function unsafeOwner(node: ts.Node, names: ReadonlySet<string>): boolean {
   if (ts.isIdentifier(node)) {
     if (!names.has(node.text) || (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) return false;
+    if (names === LOADER_OWNERS && ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+      let container: ts.Node = node.parent.parent;
+      let target: ts.Node = container;
+      while (ts.isObjectLiteralExpression(container) || ts.isArrayLiteralExpression(container) || ts.isPropertyAssignment(container) || ts.isParenthesizedExpression(container) || ts.isSpreadElement(container) || ts.isAsExpression(container) || ts.isSatisfiesExpression(container) || ts.isNonNullExpression(container) || ts.isTypeAssertionExpression(container)) { target = container; container = container.parent; }
+      const assignment = ts.isBinaryExpression(container) && container.operatorToken.kind === ts.SyntaxKind.EqualsToken && container.left === target;
+      const loop = (ts.isForOfStatement(container) || ts.isForInStatement(container)) && container.initializer === target;
+      if (!assignment && !loop) return false;
+    }
   } else if (ts.isPropertyAccessExpression(node)) {
     if (!globalObject(node.expression) || !names.has(node.name.text)) return false;
   } else if (ts.isElementAccessExpression(node)) {
@@ -54,18 +62,23 @@ const LOADER_OWNERS = new Set(["process", "module"]);
 function globalPatternKeys(node: ts.Node, names: ReadonlySet<string>): ts.Node[] {
   let pattern: ts.Node | undefined;
   if (ts.isVariableDeclaration(node) && ts.isObjectBindingPattern(node.name) && node.initializer && globalObject(node.initializer)) pattern = node.name;
+  if (ts.isParameter(node) && ts.isObjectBindingPattern(node.name) && node.initializer && globalObject(node.initializer)) pattern = node.name;
   if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isObjectLiteralExpression(peel(node.left)) && globalObject(node.right)) pattern = peel(node.left);
   if (!pattern) return [];
-  const members = ts.isObjectBindingPattern(pattern) ? pattern.elements : ts.isObjectLiteralExpression(pattern) ? pattern.properties : [];
   const refused: ts.Node[] = [];
-  for (const member of members) {
-    const key = ts.isBindingElement(member) ? member.propertyName ?? member.name : ts.isPropertyAssignment(member) || ts.isShorthandPropertyAssignment(member) ? member.name : undefined;
-    if (!key) continue;
-    if (ts.isComputedPropertyName(key)) {
-      const value = literalKey(key.expression);
-      if (value === undefined || names.has(value)) refused.push(key);
-    } else if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && names.has(key.text)) refused.push(key);
-  }
+  const visitPattern = (current: ts.Node) => {
+    const members = ts.isObjectBindingPattern(current) ? current.elements : ts.isObjectLiteralExpression(current) ? current.properties : [];
+    for (const member of members) {
+      const key = ts.isBindingElement(member) ? member.propertyName ?? member.name : ts.isPropertyAssignment(member) || ts.isShorthandPropertyAssignment(member) ? member.name : undefined;
+      if (!key) continue;
+      if (ts.isComputedPropertyName(key)) {
+        const value = literalKey(key.expression);
+        if (value === undefined || names.has(value)) refused.push(key);
+      } else if ((ts.isIdentifier(key) || ts.isStringLiteral(key)) && names.has(key.text)) refused.push(key);
+      if (ts.isParameter(node) && ts.isBindingElement(member) && ts.isObjectBindingPattern(member.name)) visitPattern(member.name);
+    }
+  };
+  visitPattern(pattern);
   return refused;
 }
 
