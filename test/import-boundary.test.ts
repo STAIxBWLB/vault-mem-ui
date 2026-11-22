@@ -232,9 +232,18 @@ test("a global key the check cannot read is described as computed", () => {
 // than leaving it implied: the concatenated key and the template with a substitution spell no single banned token.
 test("a name built at runtime is an allowed limitation", () => {
   for (const source of [
-    'const g = process["get" + "BuiltinModule"];\ng("node:fs");',
-    'const g = process[`getBuiltin${"Module"}`];\ng("node:fs");',
+    'const g = other["get" + "BuiltinModule"];\ng("node:fs");',
+    'const g = other[`getBuiltin${"Module"}`];\ng("node:fs");',
   ]) expect(boundaryViolations(source, "example.ts")).toEqual([]);
+});
+
+test("unknown computed keys on known global and loader objects are refused throughout src", () => {
+  for (const owner of ["process", "module", "globalThis", "self", "window", "global", "globalThis.self", 'globalThis["self"]', "globalThis.process", 'globalThis["module"]']) {
+    const found = boundaryViolations(`const key = "safe"; ${owner}[key];`, "src/client/probe.ts");
+    expect({ owner, refused: found.some((message) => message.includes("computed key")) }).toEqual({ owner, refused: true });
+  }
+  expect(boundaryViolations('const key="getBuiltinModule"; process[key]("node:fs")', "src/client/probe.ts")).not.toEqual([]);
+  expect(boundaryViolations('process["get" + "BuiltinModule"]', "src/client/probe.ts")).not.toEqual([]);
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {

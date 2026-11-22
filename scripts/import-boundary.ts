@@ -61,6 +61,7 @@ function globalObject(expression: ts.Expression): boolean {
   const node = peel(expression);
   if (ts.isIdentifier(node)) return GLOBAL_NAMES.has(node.text);
   if (ts.isPropertyAccessExpression(node)) return GLOBAL_NAMES.has(node.name.text) && globalObject(node.expression);
+  if (ts.isElementAccessExpression(node)) return GLOBAL_NAMES.has(literalKey(node.argumentExpression) ?? "") && globalObject(node.expression);
   return false;
 }
 
@@ -81,6 +82,11 @@ function unreadableMemberKey(node: ts.Node): string | undefined {
   if (literalKey(node.argumentExpression) !== undefined) return undefined;
   const owner = peel(node.expression);
   if (ts.isIdentifier(owner) && (owner.text === "process" || owner.text === "module")) return owner.text;
+  if (ts.isPropertyAccessExpression(owner) && (owner.name.text === "process" || owner.name.text === "module") && globalObject(owner.expression)) return owner.name.text;
+  if (ts.isElementAccessExpression(owner) && globalObject(owner.expression)) {
+    const name = literalKey(owner.argumentExpression);
+    if (name === "process" || name === "module") return name;
+  }
   return globalObject(owner) ? "the global object" : undefined;
 }
 
@@ -196,9 +202,8 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
  *
  * Every message names the file and line, the form that was refused, and the next step.
  *
- * A name built at runtime is out of reach of a syntactic check: `process["get" + "BuiltinModule"]`, a template with
- * substitutions and a key held in a variable spell no token, and refusing them would mean evaluating the source. The
- * same goes for a shape that names no loader at all but loads one, which only a runtime guard could see.
+ * Computed keys on known global or loader objects are refused, but a name built at runtime on another object is out of
+ * reach of a syntactic check. A shape that names no loader at all but loads one needs a runtime guard.
  */
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -228,6 +233,8 @@ export function boundaryViolations(source: string, filename: string): string[] {
     // alias are one token each, so the class closes on the name instead of on the shape of the call around it.
     const loader = loaderName(node);
     if (loader) reject(node, loader);
+    const unreadable = !assetReader && unreadableMemberKey(node);
+    if (unreadable) reject(node, `a computed key on ${unreadable}`);
     // A dynamic import hands back the same module object as a static one, so it is held to the same list, and a
     // specifier the check cannot read is refused like any other.
     const load = dynamicImport(node);
