@@ -9,7 +9,7 @@
 import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console/contract";
 import { isPanelId } from "../client/prefs.ts";
 
-export const GRAPH_PANEL = { id: "graph", title: "Graph", order: 7 } as const;
+export const GRAPH_PANEL = { id: "graph", title: "Graph", order: 6.5 } as const;
 
 export const GRAPH_UNAVAILABLE =
   "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";

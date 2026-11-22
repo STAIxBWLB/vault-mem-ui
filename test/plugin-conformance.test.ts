@@ -48,5 +48,6 @@ registerConsoleConformance(plugin, {
   destructive: [
     { action: "delete", path: "notes/a.md" },
     { action: "move", from: "notes/a.md", to: "beta" },
+    { action: "settings", vault: "test", changes: { write: "none" } },
   ],
 });

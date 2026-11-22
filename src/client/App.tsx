@@ -14,6 +14,7 @@ import { LogView } from "./views/log.tsx";
 import { NoteView } from "./views/note.tsx";
 import { NotesView } from "./views/notes.tsx";
 import { OverviewView } from "./views/overview.tsx";
+import { SettingsView } from "./views/settings.tsx";
 import { PromoteView } from "./views/promote.tsx";
 import { GraphPanel } from "../graph/view/GraphView.tsx";
 
@@ -25,9 +26,10 @@ const TITLES: Record<string, string> = {
   lint: "Lint",
   log: "Log",
   graph: "Graph",
+  settings: "Settings",
 };
 
-const VIEWS = {
+export const VIEWS = {
   overview: OverviewView,
   notes: NotesView,
   note: NoteView,
@@ -35,6 +37,7 @@ const VIEWS = {
   lint: LintView,
   log: LogView,
   graph: GraphPanel,
+  settings: SettingsView,
 };
 
 export type Navigate = (panel: string, params?: Record<string, string>) => void;
