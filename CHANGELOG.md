@@ -6,7 +6,25 @@ section. `## [Unreleased]` holds the work that no release has shipped yet.
 
 ## [Unreleased]
 
-- Add similar notes and an optional weighted semantic graph layout for enrichment-enabled vaults.
+## [0.2.0] - 2026-11-23
+
+Requires `@staix/vault-mem` 0.14.0.
+
+### Added
+
+- Similar notes in the graph inspector and an optional weighted semantic graph layout for enrichment-enabled vaults.
+- Inferred links are distinguished from extracted links and can be hidden from the graph and export.
+
+### Changed
+
+- The import boundary check refuses loader names, computed keys on known owners and global aliases by name; runtime-assembled names on other objects and global aliases outside the asset reader remain stated limits.
+
+### Fixed
+
+- Semantic layouts keep the canvas and camera, avoid writing semantic positions to the plain layout cache, and recover from stale graph revisions.
+- Markdown heading and inline code-span scans run in linear time on long inputs.
+- The import boundary check handles default parameter destructuring without refusing ordinary object keys, while retaining assignment-target protections.
+- Semantic layout waits for a live layout worker; history does not offer a cursor reset for an unknown vault.
 
 ## [0.1.0] - 2026-11-22
 
