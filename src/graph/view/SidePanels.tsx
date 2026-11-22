@@ -42,7 +42,7 @@ export function GraphLegend({ state, themeKey = "" }: { state: GraphViewState; t
     if (!list) return;
     refreshGraphTheme(list.closest(".vmem-graph")?.querySelector(".vmem-graph-canvas"));
     list.querySelectorAll<HTMLElement>("[data-community]").forEach((el) => { el.style.backgroundColor = communityColor(Number(el.dataset.community)); });
-  }, [communities, themeKey]);
+  }, [communities, themeKey, state.colorByCommunity]);
   return <section className="vmem-card vmem-graph-panel" aria-label="Graph legend"><h2 className="vmem-card-title">Legend</h2><p>Node size reflects link count. Unresolved notes use the canvas background. Selected and path nodes are highlighted.</p><p>Arrows represent frontmatter links; lines represent other links.</p>{state.colorByCommunity && communities.length > 0 && <ul ref={swatches} aria-label="Community colours">{communities.map((item) => <li key={item.value}><span className="vmem-community-swatch" data-community={item.value} aria-hidden="true" /> Community {item.value}</li>)}</ul>}</section>;
 }
 
