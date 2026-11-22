@@ -170,6 +170,14 @@ test("unchanged polling and pushes reuse the graph; a new revision loads all pag
   expect(store.getState().phase).toBe("ready");
   expect(store.getState().error).toBeUndefined();
   expect(store.getState().reply?.graph).toBe(newGraph);
+  failNext = true; await store.refresh();
+  expect(store.getState().phase).toBe("error");
+  host.push({ ...updated[0]!, cursor: 222 });
+  await Bun.sleep(0);
+  expect(store.getState().phase).toBe("ready");
+  expect(store.getState().error).toBeUndefined();
+  expect(store.getState().reply?.graph).toBe(newGraph);
+  expect((store.getState().reply?.graphStats as { cursor: number }).cursor).toBe(222);
   stop();
 });
 
@@ -181,8 +189,15 @@ test("rejects inconsistent revisions, offsets, sizes, totals and repeated cursor
   expect((await run({ ...pages[1], next: "edge-page" })).error).toContain("cursor is invalid");
   expect((await run({ ...pages[1], count: 0, columns: { source: [], target: [], relation: [], relations: [], field: [], rel: [], confidence_tag: [], confidence: [] }, next: null })).error).toContain("incomplete");
   const oversized = { ...pages[0]!, totals: { ...pages[0]!.totals, nodes: 10001 } };
-  expect((await assembleGraphPages(async () => ({}), oversized, {})).error).toContain("10,000 notes, 100,000 links");
-  expect((await assembleGraphPages(async () => ({}), { ...pages[0], totals: null }, {})).error).toContain("malformed totals");
+  const sizeMessage = "Graphs larger than 10,000 notes or 100,000 links are not supported in this panel yet; use Search or the note list instead.";
+  expect((await assembleGraphPages(async () => ({}), oversized, {})).error).toBe(sizeMessage);
+  expect((await assembleGraphPages(async () => ({}), { ...pages[0]!, totals: { ...pages[0]!.totals, edges: 100001 } }, {})).error).toBe(sizeMessage);
+  for (const totals of [null, { ...pages[0]!.totals, nodes: -1 }, { ...pages[0]!.totals, nodes: 1.5 }]) {
+    expect((await assembleGraphPages(async () => ({}), { ...pages[0], totals }, {})).error).toBe("Graph provider returned malformed totals; update @staix/vault-mem or report its version.");
+  }
+  for (const revision of [undefined, "", "   ", 42]) {
+    expect((await assembleGraphPages(async () => ({}), { ...pages[0], revision }, {})).error).toBe("Graph provider returned a missing or invalid revision; update @staix/vault-mem or report its version.");
+  }
 });
 
 test("cancellation stops page assembly before processing a delayed page", async () => {
