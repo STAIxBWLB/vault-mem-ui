@@ -100,7 +100,11 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   const set = (patch: Partial<GraphViewState>) => {
     const next = { ...state, ...patch };
     if ("cameraRatio" in patch || "layout" in patch) {
-      next.lod = lodFor(model.edges.length, { ratio: next.cameraRatio, layoutRunning: next.layout.kind === "running" });
+      const lod = lodFor(model.edges.length, { ratio: next.cameraRatio, layoutRunning: next.layout.kind === "running" });
+      // Keep the same object while the result is unchanged, so the canvas can skip camera-only updates by identity.
+      const same = lod.reduced === state.lod.reduced && lod.edgeStride === state.lod.edgeStride
+        && lod.labelDensity === state.lod.labelDensity && lod.renderLabels === state.lod.renderLabels;
+      next.lod = same ? state.lod : lod;
     }
     state = next;
     for (const l of listeners) l();

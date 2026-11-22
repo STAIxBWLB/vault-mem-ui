@@ -33,6 +33,7 @@ afterEach(() => {
 interface Fake {
   deps: CanvasDeps;
   attrs: Map<string, Record<string, unknown>>;
+  edgeAttrs: Map<string, Record<string, unknown>>;
   settings: Record<string, unknown>;
   handlers: Map<string, (p: { node?: string }) => void>;
   refreshes: number;
@@ -40,13 +41,19 @@ interface Fake {
   edgeColors: Map<string, string>;
 }
 function fakeCanvas(): Fake {
-  const fake: Fake = { attrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
+  const fake: Fake = { attrs: new Map(), edgeAttrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
   const graph: GraphLike = {
     addNode: (id, a) => fake.attrs.set(id, { ...a }),
-    addEdgeWithKey: () => undefined,
-    setNodeAttribute: (id, k, v) => { fake.attrs.get(id)![k] = v; },
+    addEdgeWithKey: (key, _s, _t, a) => fake.edgeAttrs.set(key, { ...a }),
     getNodeAttribute: (id, k) => fake.attrs.get(id)?.[k],
-    setEdgeAttribute: (key, k, v) => { fake.edgeColors.set(key, v as string); void k; },
+    updateEachNodeAttributes: (fn) => { for (const [id, a] of fake.attrs) fake.attrs.set(id, fn(id, a)); },
+    updateEachEdgeAttributes: (fn) => {
+      for (const [key, a] of fake.edgeAttrs) {
+        const next = fn(key, a);
+        fake.edgeAttrs.set(key, next);
+        if (typeof next.color === "string") fake.edgeColors.set(key, next.color);
+      }
+    },
     hasNode: (id) => fake.attrs.has(id),
   };
   const sigma: SigmaLike = {
@@ -55,6 +62,7 @@ function fakeCanvas(): Fake {
     getNodeDisplayData: (id) => (fake.attrs.has(id) ? { x: 0, y: 0 } : undefined),
     setSetting: (k, v) => { fake.settings[k] = v; },
     refresh: () => { fake.refreshes += 1; },
+    hasProgramIndices: () => true,
     kill: () => { fake.killed = true; },
   };
   fake.deps = { createGraph: () => graph, createSigma: (_g, _c, s) => { Object.assign(fake.settings, s); return sigma; } };
@@ -340,6 +348,26 @@ describe("GraphPanel", () => {
     const refreshes = fake.refreshes;
     await act(async () => fake.handlers.get("enterNode")!({ node: "c" }));
     expect(fake.refreshes).toBeGreaterThan(refreshes);
+  });
+
+  test("Ctrl/Cmd/Alt chords reach the browser; only bare keys drive the graph", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    const canvas = container.querySelector(".vmem-graph-canvas") as HTMLElement;
+    for (const init of [{ key: "p", ctrlKey: true }, { key: "p", metaKey: true }, { key: "l", ctrlKey: true }, { key: "ArrowRight", altKey: true }]) {
+      const event = new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true });
+      await act(async () => { canvas.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(false);
+    }
+    expect(container.textContent).not.toContain("Global view");
+    expect(container.textContent).toContain("Alpha");
+    const bare = new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true });
+    await act(async () => { canvas.dispatchEvent(bare); });
+    expect(bare.defaultPrevented).toBe(true);
+    expect(container.textContent).toContain("Global view");
   });
 
   test("toolbar opens the local view and back", async () => {
