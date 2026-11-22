@@ -130,6 +130,16 @@ test("provider columnar unresolved placeholders stay non-navigable", async () =>
   expect((result.graph as GraphInput).edges).toContainEqual({ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false });
 });
 
+test("an assembled reply keeps the first page's declared actions, and invents none", async () => {
+  const pages = fakePages();
+  const declared = { actions: ["delete", "link"] };
+  const withActions = await assembleGraphPages(async (input) => (input.page ? pages[1]! : { ...pages[0]!, cursor: 0, capabilities: declared }), { ...pages[0]!, cursor: 0, capabilities: declared }, {});
+  expect(withActions.capabilities).toEqual(declared);
+  // The reply is rebuilt from its pages, so a host that declares nothing gets no field rather than an empty one.
+  const plain = await assembleGraphPages(async (input) => (input.page ? pages[1]! : pages[0]!), pages[0]!, {});
+  expect("capabilities" in plain).toBe(false);
+});
+
 test("errors stay verbatim and a second stale page does not retry forever", async () => {
   const error = { error: "graph: no selected vault; select a registered vault" };
   expect(await assembleGraphPages(async () => ({}), error, {})).toEqual(error);

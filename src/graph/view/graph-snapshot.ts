@@ -68,5 +68,8 @@ async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params
     page = next as unknown as GraphSnapshotPage;
   }
   if (nodes.length !== start.totals.nodes || edges.length !== start.totals.edges) return { error: "Graph pages are incomplete; restart from the first page." };
-  return { graph: { nodes, edges, ...(Object.keys(communities).length ? { communities } : {}) }, graphStats: { pages, bytes, revision: start.revision, cursor: start.cursor, vault: start.vault, placeholdersOmitted: start.totals.placeholdersOmitted } };
+  // The reply is rebuilt from its pages, so a field the host put on the first page that is not page data has to be
+  // carried over explicitly: the provider's declared actions are what the link control reads.
+  const capabilities = first.capabilities;
+  return { graph: { nodes, edges, ...(Object.keys(communities).length ? { communities } : {}) }, graphStats: { pages, bytes, revision: start.revision, cursor: start.cursor, vault: start.vault, placeholdersOmitted: start.totals.placeholdersOmitted }, ...(capabilities !== null && typeof capabilities === "object" ? { capabilities } : {}) };
 }
