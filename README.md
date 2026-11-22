@@ -54,6 +54,41 @@ The vault it serves is the one vmem resolves for this process, not `$AGENTHUB_HO
 - A provider failure is logged to the terminal and answered with the reason and the next step.
 - The page runs every panel this bundle implements; a provider panel without a view stays out of the manifest instead of appearing as an empty tab.
 
+## Releasing
+
+A release is one tag on a green `main`: the tag runs the checks again, packs once and publishes that exact tarball to npm with provenance, then creates the GitHub release from the changelog section.
+
+1. Release-prep PR: bump `version` in `package.json` and move the `## [Unreleased]` entries under `## [x.y.z] - YYYY-MM-DD`. Until that dated section exists the tag is refused, because `Unreleased` alone is not a release.
+2. Merge it, then on a clean, up-to-date `main`: `bun run release:tag --push`. Without `--push` the annotated tag stays local. The script refuses a tree that is not clean, a `main` behind `origin/main`, a tag that already exists, a version that does not increase over the existing release tags, and a missing dated section, and each refusal names the next step.
+3. `.github/workflows/release.yml` re-checks the tag against the package version and the changelog, requires the commit to be on `main` with a green `Check` run for it, runs `bun run check`, shows the `npm pack` file list, stages the tarball with a SHA-256 manifest, and installs that tarball in an empty consumer project (`bun scripts/package-smoke.ts`) so the packaged plugin imports and `vmem-ui --help` runs before anything is published.
+
+### The first publish
+
+`@staix/vault-mem-ui` has never been published (`npm view @staix/vault-mem-ui` answers 404), and npm's trusted publishing is configured on a package that already exists, which the flow here needs: the publish job has no npm token and reaches the registry only through OIDC. So the first release is three steps, all of them a person's:
+
+1. Bootstrap the package name once, from a clean `main` checkout that still holds the placeholder version `0.0.0`. `dist/` is not in git (it is ignored), so publishing the checkout would ship whatever build it happens to hold; run the gates and publish the bytes the smoke test installed instead:
+
+   ```sh
+   bun install --frozen-lockfile && bun run check
+   mkdir -p /tmp/vmem-bootstrap
+   npm pack --ignore-scripts --pack-destination /tmp/vmem-bootstrap
+   bun scripts/package-smoke.ts /tmp/vmem-bootstrap/staix-vault-mem-ui-0.0.0.tgz
+   npm publish /tmp/vmem-bootstrap/staix-vault-mem-ui-0.0.0.tgz --access public --provenance=false --tag bootstrap
+   ```
+
+   That publishes the placeholder `0.0.0`, not the release-prep version: npm never lets a published version be reused, so spending `0.0.0` here keeps the release-prep version free for the tag flow, and `--tag bootstrap` leaves `latest` unset, so `npm i @staix/vault-mem-ui` stays unresolved until the first real release. `--provenance=false` overrides `publishConfig.provenance`, which asks for an OIDC identity a local shell does not have. If that checkout's `package.json` already names a release version, stop before publishing: that version belongs to the tag flow, and publishing it here would make the tag release fail as already on the registry.
+2. Attach the trusted publisher, the same configuration as the list below: `npm trust github @staix/vault-mem-ui --file release.yml --repository STAIxBWLB/vault-mem-ui --environment npm-production --allow-publish` (npm 12 has this command; `npm trust --help` lists its flags).
+3. Set `NPM_PUBLISH_ENABLED=true`. The release-prep PR then sets the first real version and its dated changelog section, and the first tag release publishes that version with provenance.
+
+Unverified from this repository, and none of it attempted here: that the gated bootstrap publish in step 1 succeeds, that `npm trust` accepts a package before any release version exists rather than requiring one, and how long an unvalidated configuration lasts. What is measured: `npm view @staix/vault-mem-ui` answers 404, `dist/` is ignored by git, `npm trust github` takes exactly those flags in npm 12.2.2, and `scripts/package-smoke.ts` installs and runs a packed tarball (see the release PR).
+
+The `Publish approved artifact with npm OIDC` job runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true`; `Publish the GitHub release` follows it. Settings a person configures once, none of which this repository sets up:
+
+- npm trusted publisher for `@staix/vault-mem-ui`: publisher GitHub, repository `STAIxBWLB/vault-mem-ui`, workflow `release.yml`, environment `npm-production`.
+- Repository variable `NPM_PUBLISH_ENABLED=true`; unset or any other value keeps publication off.
+- The `npm-production` environment, with whatever protection rules it should carry.
+- Provenance comes from the publish job's own `id-token: write`, so no npm token secret is stored.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
