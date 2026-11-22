@@ -35,7 +35,7 @@ export type Block =
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 const CLOSING_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
-const ATX = /^ {0,3}(#{1,6})(?:[ \t]+(.*))?$/;
+const ATX = /^ {0,3}(#{1,6})(?:[ \t](.*))?$/;
 const SETEXT = /^ {0,3}(=+|-+)[ \t]*$/;
 const RULE = /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
 const QUOTE = /^ {0,3}>[ ]?/;
@@ -111,10 +111,13 @@ function parseBlocks(lines: string[], depth: number): Block[] {
 
     const atx = ATX.exec(line);
     if (atx) {
-      let heading = (atx[2] ?? "").trim();
+      let heading = atx[2] ?? "";
       let end = heading.length;
+      while (end > 0 && (heading[end - 1] === " " || heading[end - 1] === "\t")) end--;
+      const trailing = end;
       while (end > 0 && heading[end - 1] === "#") end--;
-      if (end > 0 && /[ \t]/.test(heading[end - 1]!)) heading = heading.slice(0, end).trimEnd();
+      if (end < trailing && end > 0 && (heading[end - 1] === " " || heading[end - 1] === "\t")) heading = heading.slice(0, end);
+      heading = heading.trim();
       blocks.push({ kind: "heading", depth: atx[1]!.length, children: parseInline(heading) });
       at += 1;
       continue;

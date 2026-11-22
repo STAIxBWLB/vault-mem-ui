@@ -38,6 +38,8 @@ describe("parseMarkdown", () => {
   test("ATX heading closing markers and unmatched backtick suffixes keep their meaning", () => {
     expect(html("# title ###")).toContain(">title</h2>");
     expect(html("# title###")).toContain(">title###</h2>");
+    expect(html("# foo # ")).toContain(">foo #</h2>");
+    expect(parseMarkdown("#    #")[0]).toEqual({ kind: "heading", depth: 1, children: [] });
     expect(parseInline("``x`y`")).toEqual([{ kind: "text", text: "`" }, { kind: "code", text: "x" }, { kind: "text", text: "y`" }]);
   });
 
@@ -487,7 +489,7 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       'parseInline("[a](".repeat(12000) + ")".repeat(12000));',
       'if (Date.now() - overlapStart > 1000) throw new Error("overlapping destinations took " + (Date.now() - overlapStart) + " ms");',
       // Median of seven warmed runs makes the 50 ms bound less sensitive to a single scheduler interruption.
-      'for (const [name, run] of [["heading", () => parseMarkdown("# " + " ".repeat(16384) + "x")], ["backticks", () => parseInline("`".repeat(16384))]]) {',
+      'for (const [name, run] of [["heading", () => parseMarkdown("# x" + " ".repeat(16384) + "y")], ["heading line separator", () => parseMarkdown("# " + " ".repeat(65536) + " ")], ["heading paragraph separator", () => parseMarkdown("# " + " ".repeat(65536) + " ")], ["backticks", () => parseInline("`".repeat(16384))]]) {',
       '  for (let i = 0; i < 3; i++) run();',
       '  const times = []; for (let i = 0; i < 7; i++) { const start = performance.now(); run(); times.push(performance.now() - start); }',
       '  times.sort((a, b) => a - b); if (times[3] >= 50) throw new Error(name + " took " + times[3] + " ms");',
