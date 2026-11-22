@@ -34,15 +34,38 @@ test("a provider that already declares graph keeps its own manifest", () => {
 test("graph snapshots become an unavailable reply only when the provider does not know the panel", async () => {
   const seen: unknown[] = [];
   const unknown = graphAwareSnapshot(async (input) => { seen.push(input.panel); return { error: `unknown panel ${input.panel}` }; });
-  expect(await unknown({ panel: "graph", after: 0 })).toEqual({ graph: null, unavailable: GRAPH_UNAVAILABLE });
+  expect(await unknown({ panel: "graph", after: 0 })).toEqual({ graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities: { actions: [] } });
   expect(await unknown({ panel: "overview", after: 0 })).toEqual({ error: "unknown panel overview" });
   const throwing = graphAwareSnapshot(async () => { throw new Error("unknown panel graph"); });
-  expect(await throwing({ panel: "graph", after: 0 })).toEqual({ graph: null, unavailable: GRAPH_UNAVAILABLE });
+  expect(await throwing({ panel: "graph", after: 0 })).toEqual({ graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities: { actions: [] } });
   const real = graphAwareSnapshot(async () => ({ graph: { nodes: [], edges: [] } }));
-  expect(await real({ panel: "graph", after: 0 })).toEqual({ graph: { nodes: [], edges: [] } });
+  expect(await real({ panel: "graph", after: 0 })).toEqual({ graph: { nodes: [], edges: [] }, capabilities: { actions: [] } });
   const failing = graphAwareSnapshot(async () => { throw new Error("disk gone"); });
   await expect(failing({ panel: "graph", after: 0 })).rejects.toThrow("disk gone");
   expect(seen).toEqual(["graph", "overview"]);
+});
+
+test("a graph reply carries the provider's declared actions, and other panels do not", async () => {
+  const declared = ["delete", "move", "link"];
+  const wrapped = graphAwareSnapshot(async (input) => input.panel === "graph" ? { graph: { nodes: [], edges: [] } } : { items: [] }, declared);
+  expect(await wrapped({ panel: "graph", after: 0 })).toMatchObject({ capabilities: { actions: declared } });
+  expect(await wrapped({ panel: "notes", after: 0 })).toEqual({ items: [] });
+  // An error from the provider is still the panel's answer, so the declaration travels with it too.
+  expect(await graphAwareSnapshot(async () => ({ error: "graph: no selected vault; select a registered vault" }), declared)({ panel: "graph", after: 0 }))
+    .toMatchObject({ error: expect.stringMatching(/no selected vault/), capabilities: { actions: declared } });
+});
+
+test("a cursor stub keeps only its own keys, and a continuation page carries no declaration", async () => {
+  const declared = ["link"];
+  // acon's shell counts an unchanged poll as `changed` + `cursor` and nothing else; a third key makes it new data.
+  const stub = await graphAwareSnapshot(async () => ({ changed: false, cursor: 7 }), declared)({ panel: "graph", after: 7 });
+  expect(stub).toEqual({ changed: false, cursor: 7 });
+  expect(Object.keys(stub)).toEqual(["changed", "cursor"]);
+  // A continuation page is read only by the assembler, which takes the declaration from the first page.
+  const page = await graphAwareSnapshot(async () => ({ schema: 1, kind: "edges", offset: 0, count: 1, next: null, cursor: 9 }), declared)({ panel: "graph", after: 0, page: "edge-page" });
+  expect("capabilities" in page).toBe(false);
+  expect(await graphAwareSnapshot(async () => ({ schema: 1, kind: "nodes", offset: 0, count: 1, next: null, cursor: 9 }), declared)({ panel: "graph", after: 0 }))
+    .toMatchObject({ capabilities: { actions: declared } });
 });
 
 test("graphProvider forwards every member and stays a valid acon provider", async () => {
@@ -53,12 +76,12 @@ test("graphProvider forwards every member and stays a valid acon provider", asyn
     action: async () => { calls.push("action"); return { ok: true }; },
     close: async () => { calls.push("close"); },
   };
-  const wrapped = graphProvider(base);
+  const wrapped = graphProvider(base, ["delete", "link"]);
   expect(providerProblems(wrapped, plugin.manifest)).toEqual([]);
   await wrapped.action({ action: "delete" });
   await wrapped.close!();
   expect(calls).toEqual(["action", "close"]);
-  expect(await wrapped.snapshot({ panel: "graph", after: 0 })).toMatchObject({ graph: null });
+  expect(await wrapped.snapshot({ panel: "graph", after: 0 })).toMatchObject({ graph: null, capabilities: { actions: ["delete", "link"] } });
 });
 
 const hosts: Host[] = [];
@@ -85,5 +108,8 @@ test("the standalone command routes graph to the unavailable reply", async () =>
     method: "POST", headers: { cookie, origin: host!.origin, "content-type": "application/json" }, body: JSON.stringify({ panel: "graph" }),
   });
   expect(res.status).toBe(200);
-  expect(await res.json()).toEqual({ graph: null, unavailable: GRAPH_UNAVAILABLE });
+  const reply = await res.json() as { capabilities?: { actions?: string[] } };
+  expect(reply).toMatchObject({ graph: null, unavailable: GRAPH_UNAVAILABLE });
+  // The standalone host conveys the provider's own declaration, so the panel can offer the link control.
+  expect(reply.capabilities?.actions).toContain("link");
 });

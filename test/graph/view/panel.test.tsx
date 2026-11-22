@@ -10,6 +10,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { CanvasDeps, GraphLike, SigmaLike } from "../../../src/graph/view/canvas";
 import { GraphPanel, configureGraph } from "../../../src/graph/view/GraphView.tsx";
+import type { ActionInput } from "../../../src/client/host.ts";
 import type { FromWorker, ToWorker } from "../../../src/graph/layout/protocol";
 
 let root: Root | null = null;
@@ -96,12 +97,12 @@ const graph = {
   ],
 };
 
-async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}, theme?: { mode: "light" | "dark" }) {
+async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: Record<string, string>) => void = () => {}, theme?: { mode: "light" | "dark" }, options: { beginWrite?(input: ActionInput): void; params?: Record<string, string> } = {}) {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
   await act(async () => {
-    root!.render(<GraphPanel reply={reply} params={{}} navigate={navigate} beginWrite={() => {}} theme={theme} />);
+    root!.render(<GraphPanel reply={reply} params={options.params ?? {}} navigate={navigate} beginWrite={options.beginWrite ?? (() => {})} theme={theme} />);
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 }
@@ -468,5 +469,114 @@ describe("GraphPanel", () => {
     expect(button("Local view").getAttribute("aria-pressed")).toBe("true");
     await act(async () => button("Global view").click());
     expect(button("Global view").getAttribute("aria-pressed")).toBe("true");
+  });
+});
+
+describe("link authoring", () => {
+  const inspector = () => container.querySelector('[aria-label="Graph inspector"]')!;
+  const propose = () => [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Propose link");
+  /** A real change event, which React's delegated listener handles for a select (its props expando is absent). */
+  const choose = async (selector: string, value: string) => {
+    const select = container.querySelector<HTMLSelectElement>(selector)!;
+    await act(async () => { select.value = value; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  };
+
+  test("a provider that declares no actions gets no link control", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    expect(inspector().textContent).toContain("Open note");
+    expect(inspector().textContent).not.toContain("Link this note");
+    expect(propose()).toBeUndefined();
+  });
+
+  test("the control appears only for a provider whose declared actions include link", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph, capabilities: { actions: ["delete", "move"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    expect(inspector().textContent).not.toContain("Link this note");
+    act(() => root!.unmount());
+    root = null;
+    await mount({ graph, capabilities: { actions: ["delete", "link"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    expect(inspector().textContent).toContain("Link this note");
+    expect(propose()).toBeDefined();
+  });
+
+  test("proposing a link sends the provider's action with both note paths, the relation and the vault", async () => {
+    const fake = fakeCanvas();
+    const written: ActionInput[] = [];
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph, capabilities: { actions: ["link"] } }, () => {}, undefined, { params: { vault: "work" }, beginWrite: (input) => written.push(input) });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    // The provider's own relation list, and nothing proposed before a target is picked.
+    expect([...container.querySelectorAll<HTMLOptionElement>("#vmem-graph-link-relation option")].map((option) => option.value))
+      .toEqual(["supports", "contradicts", "extends", "applies-to", "context-for"]);
+    // Only notes with a file can be targets, so the unresolved "c" is not offered.
+    expect([...container.querySelectorAll<HTMLOptionElement>("#vmem-graph-link-target option")].map((option) => option.value)).toEqual(["", "b"]);
+    expect(propose()!.disabled).toBe(true);
+    await choose("#vmem-graph-link-target", "b");
+    await choose("#vmem-graph-link-relation", "contradicts");
+    expect(propose()!.disabled).toBe(false);
+    await act(async () => propose()!.click());
+    expect(written).toEqual([{ action: "link", from: "notes/a.md", to: "notes/b.md", relation: "contradicts", bidirectional: true, vault: "work" }]);
+  });
+
+  test("unchecking both directions proposes a one-way link", async () => {
+    const fake = fakeCanvas();
+    const written: ActionInput[] = [];
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph, capabilities: { actions: ["link"] } }, () => {}, undefined, { beginWrite: (input) => written.push(input) });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    await choose("#vmem-graph-link-target", "b");
+    const both = inspector().querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(both.checked).toBe(true);
+    await act(async () => both.click());
+    expect(both.checked).toBe(false);
+    await act(async () => propose()!.click());
+    expect(written).toEqual([{ action: "link", from: "notes/a.md", to: "notes/b.md", relation: "supports", bidirectional: false }]);
+  });
+
+  test("an unresolved note cannot start a link", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph, capabilities: { actions: ["link"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "c" }));
+    expect(inspector().textContent).toContain("unresolved link with no file");
+    expect(propose()).toBeUndefined();
+  });
+
+  test("choosing another note starts the link form empty", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const nodes = ["a", "b", "c"].map((id) => ({ id, label: id.toUpperCase(), relPath: `notes/${id}.md` }));
+    await mount({ graph: { nodes, edges: [] }, capabilities: { actions: ["link"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    await choose("#vmem-graph-link-target", "b");
+    expect(container.querySelector<HTMLSelectElement>("#vmem-graph-link-target")!.value).toBe("b");
+    await act(async () => fake.handlers.get("clickNode")!({ node: "c" }));
+    // C is another note, so the form starts again instead of proposing C to the target picked while A was selected.
+    expect(container.querySelector<HTMLSelectElement>("#vmem-graph-link-target")!.value).toBe("");
+    expect(propose()!.disabled).toBe(true);
+  });
+
+  test("a large graph lists 200 targets and says how to reach the rest", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const nodes = Array.from({ length: 251 }, (_, i) => ({ id: `n${i}`, label: `Note ${i}`, relPath: `notes/n${i}.md` }));
+    await mount({ graph: { nodes, edges: [] }, capabilities: { actions: ["link"] } });
+    await flush();
+    await act(async () => fake.handlers.get("clickNode")!({ node: "n0" }));
+    expect(inspector().textContent).toContain("Showing the first 200 of 250 notes by label; search or filter to narrow.");
+    expect(container.querySelectorAll("#vmem-graph-link-target option")).toHaveLength(201);
   });
 });

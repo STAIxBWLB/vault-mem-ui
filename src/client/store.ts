@@ -65,10 +65,16 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
   // is still current, so a reply cannot reopen a write on a panel or view the person already left, or after Cancel.
   let ticket = 0;
   let hostWritePending = false;
+  // A write changes what the graph pages say, so the cursor the panel holds may predate it. Until the provider sends
+  // the graph itself (not a cursor-only `changed: false` stub), it is asked for its first page instead of
+  // `after: cursor`, which would answer `changed: false` and keep the graph the person just changed.
+  let freshGraph = false;
   const acceptSnapshot = async (reply: SnapshotReply, seq: number, panel: string, params: Record<string, string>) => {
     if (seq !== asked) return;
     const stats = state.reply?.graphStats as { cursor?: unknown; vault?: unknown; revision?: unknown } | undefined;
     if (panel === "graph" && state.reply?.graph && stats && reply.schema === 1 && reply.kind === "nodes" && reply.offset === 0 && typeof reply.cursor === "number" && Number.isSafeInteger(reply.cursor) && reply.cursor >= 0 && reply.vault === stats.vault && reply.revision === stats.revision) {
+      // The same revision as the graph the panel holds, so no first-page read is owed any more.
+      freshGraph = false;
       if (reply.cursor !== stats.cursor) set({ reply: { ...state.reply, graphStats: { ...stats, cursor: reply.cursor } }, phase: "ready", error: undefined });
       else if (state.phase !== "ready" || state.error) set({ phase: "ready", error: undefined });
       return;
@@ -76,9 +82,11 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
     const assembled = panel === "graph" ? await assembleGraphPages((input) => host.snapshot(input), reply, params, () => seq === asked) : reply;
     if (seq !== asked) return;
     if (assembled.changed === false && state.reply) {
+      // A stub carries no graph, so the first-page demand stands for the next refresh.
       if (state.phase !== "ready" || state.error) set({ phase: "ready", error: undefined });
       return;
     }
+    if (panel === "graph") freshGraph = false;
     set({ reply: assembled, phase: "ready", error: undefined });
   };
   const own = (write: WriteState) => {
@@ -112,7 +120,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // the person already moved to, nor the same panel asked with different parameters.
       const seq = ++asked;
       const stats = state.reply?.graphStats as { cursor?: unknown } | undefined;
-      const input = { panel: state.panel, ...state.params, ...(state.panel === "graph" && state.reply?.graph && typeof stats?.cursor === "number" ? { after: stats.cursor } : {}) };
+      const input = { panel: state.panel, ...state.params, ...(state.panel === "graph" && state.reply?.graph && !freshGraph && typeof stats?.cursor === "number" ? { after: stats.cursor } : {}) };
       try {
         const reply = await host.snapshot(input);
         await acceptSnapshot(reply, seq, input.panel, state.params);
@@ -140,7 +148,10 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // A host that owns the confirmation already told the person through its own notification (`quiet`), so the
       // panel keeps no dialog state for it; anything else is shown here.
       set({ write: result.phase === "done" && result.quiet ? { phase: "idle" } : result });
-      if (result.phase === "done") void store.refresh();
+      if (result.phase === "done") {
+        if (state.panel === "graph") freshGraph = true;
+        void store.refresh();
+      }
     },
     async confirmWriteNow() {
       const current = state.write;
@@ -154,7 +165,10 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       clearTimeout(timer);
       if (mine !== ticket) return;
       set({ write: result });
-      if (result.phase === "done") void store.refresh();
+      if (result.phase === "done") {
+        if (state.panel === "graph") freshGraph = true;
+        void store.refresh();
+      }
     },
     start() {
       const stops: (() => void)[] = [];

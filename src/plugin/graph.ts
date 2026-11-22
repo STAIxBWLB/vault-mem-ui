@@ -29,26 +29,38 @@ function isUnknownGraphPanel(reply: Record<string, unknown>): boolean {
   return typeof reply.error === "string" && /unknown panel/i.test(reply.error) && !("graph" in reply);
 }
 
-/** Snapshot that answers `graph` with an explicit unavailable reply when the provider does not know the panel. */
-export function graphAwareSnapshot(snapshot: ConsoleProvider["snapshot"]): ConsoleProvider["snapshot"] {
+/** Snapshot that answers `graph` with an explicit unavailable reply when the provider does not know the panel.
+ *
+ *  A graph reply also carries the provider's declared `capabilities.actions`, because neither host hands the manifest
+ *  to the panel (`ConsoleHost` has no such member) and the graph's link control may only appear when the provider
+ *  declares `link`. `actions` is the same list the manifest declares: the provider's own action vocabulary.
+ *
+ *  Two replies are left exactly as the provider sent them. A `changed: false` cursor stub must keep only its own keys,
+ *  because acon's shell counts an unchanged poll by them (`shell/shell.js` `pollPanel`); with a third key it would push
+ *  the stub as new data and cache it, replacing the panel's graph. A continuation page needs no declaration either:
+ *  the assembler reads it from the first page, which is not a `page` request. */
+export function graphAwareSnapshot(snapshot: ConsoleProvider["snapshot"], actions: readonly string[] = []): ConsoleProvider["snapshot"] {
+  const capabilities = { actions: [...actions] };
   return async (input) => {
     if (input.panel !== GRAPH_PANEL.id) return snapshot(input);
     let reply: Record<string, unknown>;
     try {
       reply = await snapshot(input);
     } catch (error) {
-      if (error instanceof Error && /unknown panel/i.test(error.message)) return { graph: null, unavailable: GRAPH_UNAVAILABLE };
+      if (error instanceof Error && /unknown panel/i.test(error.message)) return { graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities };
       throw error;
     }
-    return isUnknownGraphPanel(reply) ? { graph: null, unavailable: GRAPH_UNAVAILABLE } : reply;
+    if (isUnknownGraphPanel(reply)) return { graph: null, unavailable: GRAPH_UNAVAILABLE, capabilities };
+    if (input.page !== undefined || reply.changed === false) return reply;
+    return { ...reply, capabilities };
   };
 }
 
 /** The provider with the graph-aware snapshot; every other member is forwarded through a call so bound methods keep working. */
-export function graphProvider(provider: ConsoleProvider): ConsoleProvider {
+export function graphProvider(provider: ConsoleProvider, actions: readonly string[] = []): ConsoleProvider {
   const wrapped: ConsoleProvider = {
     assets: provider.assets,
-    snapshot: graphAwareSnapshot((input) => provider.snapshot(input)),
+    snapshot: graphAwareSnapshot((input) => provider.snapshot(input), actions),
     action: (input, meta) => provider.action(input, meta),
   };
   if (provider.principalSnapshot) wrapped.principalSnapshot = (input) => provider.principalSnapshot!(input);

@@ -8,6 +8,33 @@
 
 import type { ActionInput, ActionResult, Change, Host } from "./host.ts";
 
+/**
+ * The relations the provider's `link` action accepts. These are `LINK_RELATIONS` from the package's `src/links.ts`,
+ * which its `.` entry does not re-export, so the five names are mirrored here; the provider refuses any other value
+ * and names this list in the refusal.
+ */
+export const LINK_RELATIONS = ["supports", "contradicts", "extends", "applies-to", "context-for"] as const;
+export type LinkRelation = (typeof LINK_RELATIONS)[number];
+
+/** The `link` action's input, before the write flow adds confirmation: exactly the arguments the provider accepts. */
+export type LinkInput = { action: "link"; from: string; to: string; relation: LinkRelation; bidirectional: boolean; vault?: string };
+
+/**
+ * The provider's two-step `link` action (`case "link"` in the package's `src/ui/plugin.ts`), whose arguments are
+ * `from`, `to` and `relation`, with `bidirectional` optional and true by default. `from` and `to` are note paths as
+ * the graph reports them (`notes/a.md`), not note ids.
+ */
+export function linkAction(input: { from: string; to: string; relation: LinkRelation; bidirectional: boolean; vault?: string }): LinkInput {
+  return {
+    action: "link",
+    from: input.from,
+    to: input.to,
+    relation: input.relation,
+    bidirectional: input.bidirectional,
+    ...(input.vault ? { vault: input.vault } : {}),
+  };
+}
+
 export type WriteState =
   | { phase: "idle" }
   | { phase: "confirming"; verb: string }
