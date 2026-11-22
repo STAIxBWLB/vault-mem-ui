@@ -170,6 +170,13 @@ test("semantic pages assemble in order and refuse a changed revision", async () 
   expect(await assembleSemanticPages(async (input) => input.page ? { ...make(1, null), revision: "other" } : make(0, "next"), "test", "rev", 2)).toEqual({ error: "Graph changed while loading semantic layout; restart from the first page." });
 });
 
+test("semantic pair limit scales with graph size", async () => {
+  const page = (count: number) => ({ schema: 1, kind: "semantic", vault: "test", revision: "rev", offset: 0, count, semantic: { source: Array(count).fill(0), target: Array(count).fill(1), score: Array(count).fill(0.9) }, next: null });
+  const supported = await assembleSemanticPages(async () => page(60_001), "test", "rev", 10_000);
+  expect("edges" in supported && supported.edges.length).toBe(60_001);
+  expect(await assembleSemanticPages(async () => page(17), "test", "rev", 2)).toEqual({ error: "Semantic graph page exceeds the supported number of similarity pairs; update @staix/vault-mem or report its version." });
+});
+
 test("provider columnar unresolved placeholders stay non-navigable", async () => {
   const pages = fakePages();
   let i = 0;

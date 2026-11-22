@@ -475,12 +475,12 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     let workers = 0;
     configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => { workers += 1; return new FakeWorker() as unknown as Worker; } });
-    await mount({ graph });
+    await mount({ graph, graphStats: { vault: "work", revision: "old" } });
     await act(async () => { FakeWorker.last!.emit({ type: "ready" } as FromWorker); });
     await flush();
     await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
     const render = (g: unknown) => act(async () => {
-      root!.render(<GraphPanel reply={{ graph: g }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
+      root!.render(<GraphPanel reply={{ graph: g, graphStats: { vault: "work", revision: "new" } }} params={{}} navigate={() => {}} beginWrite={() => {}} />);
     });
     await render(structuredClone(graph));
     await flush();
