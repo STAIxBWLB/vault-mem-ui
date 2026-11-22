@@ -265,6 +265,7 @@ describe("writes", () => {
     const first = store.confirmWriteNow();
     const second = store.confirmWriteNow();
     store.setWrite({ phase: "idle" });
+    await store.beginWrite({ action: "delete", path: "notes/b.md" });
     expect(store.getState().write).toEqual({ phase: "confirming", verb: "Delete note" });
     expect(host.calls.action).toHaveLength(2);
     pending[1]!.resolve({ ok: true, message: "Delete note: done" });

@@ -70,6 +70,10 @@ describe("WriteDialog focus", () => {
     expect(dialog()?.textContent).toContain("Applying changes...");
     expect([...dialog()!.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
     expect(focused()).toBe(dialog());
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    act(() => dialog()!.dispatchEvent(tab));
+    expect(tab.defaultPrevented).toBe(true);
+    expect(focused()).toBe(dialog());
   });
 
   test("opening moves the focus into the dialog, so the panel behind it cannot be typed into", () => {

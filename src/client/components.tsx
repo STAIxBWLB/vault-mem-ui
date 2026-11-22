@@ -160,7 +160,7 @@ export function WriteDialog(props: { state: WriteState; onConfirm(): void; onCan
     const inside = box.current;
     if (!inside) return;
     const focusable = [...inside.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')];
-    if (!focusable.length) return;
+    if (!focusable.length) { event.preventDefault(); inside.focus(); return; }
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
     const at = document.activeElement;

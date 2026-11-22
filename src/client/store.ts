@@ -111,6 +111,7 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       own(write);
     },
     async beginWrite(input) {
+      if (state.write.phase === "confirming") return;
       const mine = ++ticket;
       const result = await startWrite(host, input);
       // The person moved to another panel, another note or another write while this preview was in flight.
