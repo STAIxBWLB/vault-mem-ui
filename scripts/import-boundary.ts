@@ -27,9 +27,25 @@ const READER_NAMES = new Set(["defineProperty", "defineProperties", "Reflect", "
 /** The expression without the parentheses around it: `(globalThis)` is still `globalThis`. */
 function peel(node: ts.Expression): ts.Expression {
   let current = node;
-  while (ts.isParenthesizedExpression(current)) current = current.expression;
+  while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current) || ts.isSatisfiesExpression(current) || ts.isNonNullExpression(current) || ts.isTypeAssertionExpression(current) || (ts.isBinaryExpression(current) && current.operatorToken.kind === ts.SyntaxKind.CommaToken)) {
+    current = ts.isBinaryExpression(current) ? current.right : current.expression;
+  }
   return current;
 }
+
+/** Known owners must not be passed or aliased: only a direct, readable member access is allowed. */
+function unsafeOwner(node: ts.Node, names: ReadonlySet<string>): boolean {
+  if (!ts.isIdentifier(node) || !names.has(node.text)) return false;
+  const parent = node.parent;
+  const owner = ts.isPropertyAccessExpression(parent) && parent.name === node && globalObject(parent.expression) ? parent : node;
+  if (owner === node && ts.isPropertyAccessExpression(parent) && parent.name === node) return false;
+  const use = owner.parent;
+  if (ts.isPropertyAccessExpression(use) && use.expression === owner) return false;
+  if (ts.isElementAccessExpression(use) && use.expression === owner && literalKey(use.argumentExpression) !== undefined) return false;
+  return true;
+}
+
+const LOADER_OWNERS = new Set(["process", "module"]);
 
 /**
  * The text of a token that spells a name. A comment and JSX text are not tokens of these kinds, so prose may name a
@@ -131,6 +147,10 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
     }
   }
   const visit = (node: ts.Node): void => {
+    if (ts.isExportDeclaration(node) && node.moduleSpecifier) {
+      problems.push(`${at(node)}: the panel asset reader cannot re-export modules; remove the export and use its fixed asset reads`);
+    }
+    if (unsafeOwner(node, GLOBAL_NAMES)) problems.push(`${at(node)}: ${tokenForm(node)} cannot be passed or aliased in the panel asset reader; use a direct member with a literal key`);
     if (ts.isImportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
       if (node.moduleSpecifier.text !== "node:fs") {
         problems.push(`${at(node)}: the panel asset reader must import readFileSync from node:fs`);
@@ -170,7 +190,7 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
     // cannot see it.
     const unreadable = unreadableMemberKey(node);
     if (unreadable) {
-      problems.push(`${at(node)}: a computed key on ${unreadable}; the panel asset reader may only use keys it can read`);
+      problems.push(`${at(node)}: a computed key on ${unreadable}; write the key as a literal`);
     }
     // The binding is usable only as the callee of one of those calls: an alias, a `Function.prototype` helper, or a
     // reference handed to something else would carry the read out from under the path check.
@@ -203,7 +223,8 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
  * Every message names the file and line, the form that was refused, and the next step.
  *
  * Computed keys on known global or loader objects are refused, but a name built at runtime on another object is out of
- * reach of a syntactic check. A shape that names no loader at all but loads one needs a runtime guard.
+ * reach of a syntactic check. `eval`, `new Function`, `module.constructor._load` and `import.meta` rewrites are outside
+ * this check; a shape that names no loader at all but loads one needs a runtime guard.
  */
 export function boundaryViolations(source: string, filename: string): string[] {
   const file = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, filename.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
@@ -228,13 +249,15 @@ export function boundaryViolations(source: string, filename: string): string[] {
   const forbidden = new Set(["file", "write", "spawn", "spawnSync", "$"]);
   const visit = (node: ts.Node): void => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) checkSpecifier(node.moduleSpecifier.text, node.moduleSpecifier);
+    if (ts.isImportEqualsDeclaration(node) && ts.isExternalModuleReference(node.moduleReference)) reject(node, "import-equals module loading");
     // A loader name, in whatever spelling the source reaches it: `(0, require)(...)`, `require.call(...)`,
     // `process.binding("fs")`, `const g = process.getBuiltinModule`, `{ "getBuiltinModule": g } = process` and an
     // alias are one token each, so the class closes on the name instead of on the shape of the call around it.
     const loader = loaderName(node);
-    if (loader) reject(node, loader);
+    if (loader) violations.push(`${at(node)}: ${loader} is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)`);
+    if (unsafeOwner(node, LOADER_OWNERS)) reject(node, `${tokenForm(node)} used without a direct literal-keyed member`);
     const unreadable = !assetReader && unreadableMemberKey(node);
-    if (unreadable) reject(node, `a computed key on ${unreadable}`);
+    if (unreadable) violations.push(`${at(node)}: a computed key on ${unreadable} is forbidden; write the key as a literal`);
     // A dynamic import hands back the same module object as a static one, so it is held to the same list, and a
     // specifier the check cannot read is refused like any other.
     const load = dynamicImport(node);
@@ -243,6 +266,7 @@ export function boundaryViolations(source: string, filename: string): string[] {
       if (arg && ts.isStringLiteral(arg)) checkSpecifier(arg.text, arg, `import(${JSON.stringify(arg.text)})`);
       else reject(arg ?? load, "nonliteral module loading");
     }
+    if (nameToken(node) === "Bun" && !ts.isIdentifier(node)) reject(node, `${tokenForm(node)} Bun alias or destructuring`);
     if (ts.isIdentifier(node) && node.text === "Bun") {
       const parent = node.parent;
       if (ts.isPropertyAccessExpression(parent) && parent.expression === node) {

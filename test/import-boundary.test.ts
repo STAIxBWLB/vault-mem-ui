@@ -89,17 +89,18 @@ test("boundary catches prohibited access", () => {
 // the `URL` key, and the provider route. A name written as a string is the same token, so the message says which string.
 test("a refusal names the file, the line, the form and the next step", () => {
   expect(boundaryViolations('const fs = process.binding("fs");', "src/client/probe.ts")).toEqual([
-    "src/client/probe.ts:1: binding is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+    "src/client/probe.ts:1: binding is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
   ]);
   expect(boundaryViolations('const a = 1;\nconst fs = require("node:fs");', "src/client/probe.ts")).toEqual([
-    "src/client/probe.ts:2: require is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+    "src/client/probe.ts:2: require is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
   ]);
   expect(boundaryViolations('const { "getBuiltinModule": g } = process;\ng("node:fs");', "src/client/probe.ts")).toEqual([
-    'src/client/probe.ts:1: the "getBuiltinModule" string is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)',
+    'src/client/probe.ts:1: the "getBuiltinModule" string is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)',
+    "src/client/probe.ts:1: process used without a direct literal-keyed member is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
   ]);
   // A private name is refused by the name it spells and reported as it was written, with its `#`.
   expect(boundaryViolations('class Probe { #require() { return 1 } }', "src/client/probe.ts")).toEqual([
-    "src/client/probe.ts:1: #require is forbidden; read and write the vault through the @staix/vault-mem provider (snapshot/action)",
+    "src/client/probe.ts:1: #require is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
   ]);
   expect(boundaryViolations('import { readFileSync } from "node:fs";\nglobalThis["URL"] = class {};', reader)).toEqual([
     'src/plugin/assets.ts:2: the "URL" string is forbidden in the panel asset reader; the reader may only name readFileSync, its two dist asset paths and the global URL constructor',
@@ -224,7 +225,8 @@ test("a global key the check cannot read is described as computed", () => {
     reader,
   );
   expect(found).toEqual([
-    "src/plugin/assets.ts:2: a computed key on the global object; the panel asset reader may only use keys it can read",
+    "src/plugin/assets.ts:2: a computed key on the global object; write the key as a literal",
+    "src/plugin/assets.ts:2: globalThis cannot be passed or aliased in the panel asset reader; use a direct member with a literal key",
   ]);
 });
 
@@ -244,6 +246,22 @@ test("unknown computed keys on known global and loader objects are refused throu
   }
   expect(boundaryViolations('const key="getBuiltinModule"; process[key]("node:fs")', "src/client/probe.ts")).not.toEqual([]);
   expect(boundaryViolations('process["get" + "BuiltinModule"]', "src/client/probe.ts")).not.toEqual([]);
+});
+
+test("casts, comma receivers, owner aliases and computed destructuring are refused", () => {
+  for (const source of ['(process as any)[k]', 'process![k]', '(0, process)[k]', '(<any>process)[k]', '(process satisfies any)[k]', 'const { [k]: g } = process', 'const p = process', 'const p = globalThis.process', 'Reflect.get(process, k)', 'Object.getOwnPropertyDescriptor(module, k)']) {
+    expect({ source, refused: boundaryViolations(source, "src/client/probe.ts").length > 0 }).toEqual({ source, refused: true });
+  }
+  for (const source of ['(globalThis as any)["U" + "RL"] = class {}', 'const g = globalThis', 'Object.getOwnPropertyDescriptor(globalThis, k)']) {
+    expect({ source, refused: boundaryViolations(source, reader).length > 0 }).toEqual({ source, refused: true });
+  }
+});
+
+test("asset exports, quoted Bun aliases and import-equals are refused", () => {
+  for (const source of ['export { writeFileSync } from "node:fs"', 'export * from "node:fs"']) expect(boundaryViolations(source, reader).join(" ")).toContain("cannot re-export");
+  for (const source of ['globalThis["Bun"].write(p, x)', 'const { "Bun": B } = globalThis', 'globalThis[`Bun`].write(p, x)', 'import fs = require("node:fs")']) expect(boundaryViolations(source, "src/client/probe.ts")).not.toEqual([]);
+  expect(boundaryViolations('const binding = 1', "src/client/probe.ts").join(" ")).toContain("rename the token");
+  expect(boundaryViolations('process[key]', "src/client/probe.ts").join(" ")).toContain("write the key as a literal");
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {
