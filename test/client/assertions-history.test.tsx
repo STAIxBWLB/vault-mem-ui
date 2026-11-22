@@ -404,6 +404,59 @@ test("history: paging the changes keeps the pair on screen, and a newer pick rid
   });
 });
 
+test("history: each list keeps its own page while the other one turns", () => {
+  const navigations: unknown[] = [];
+  const changes = {
+    from: older.revision, to: newer.revision,
+    changed: [{ path: "notes/a.md", status: "M", before: "1111aaaa2222", after: "3333bbbb4444" }],
+    total: 4, truncated: true, continuation: "ch2", skippedDenied: 0, skippedSymlink: 0,
+  };
+  mount(
+    <HistoryView
+      reply={{ ...historyReply, history: { ...history, continuation: "h3" }, changes }}
+      params={{ path: "notes/a.md", from: older.revision, to: newer.revision, cursor: "h2", changesCursor: "ch1" }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+
+  // The revisions move on; the changes stay on the page they were showing.
+  click(button("Older revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: {
+      vault: "work", path: "notes/a.md", cursor: "h3",
+      from: older.revision, to: newer.revision, pickFrom: older.revision, pickTo: newer.revision, changesCursor: "ch1",
+    },
+  });
+  // The changes move on; the revisions stay where they were.
+  click(button("More changes")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: older.revision, pickTo: newer.revision, cursor: "h2", changesCursor: "ch2",
+    },
+  });
+  // Each first page drops only its own cursor.
+  click(button("First page")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: older.revision, pickTo: newer.revision, cursor: "h2",
+    },
+  });
+  click(button("Newest revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: older.revision, pickTo: newer.revision, changesCursor: "ch1",
+    },
+  });
+});
+
 test("history: a pair that changes nothing, and a note the panel was not given", () => {
   const navigations: unknown[] = [];
   const changes = { from: older.revision, to: newer.revision, changed: [], total: 0, truncated: false, skippedDenied: 0, skippedSymlink: 0 };

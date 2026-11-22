@@ -47,11 +47,21 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   // list the person is no longer looking at. The pick rides along, so choosing a new pair survives a page turn too.
   const shownFrom = str(changes.from);
   const shownTo = str(changes.to);
-  const changesNav = (extra: Record<string, string>) => nav({ from: shownFrom, to: shownTo, ...pickParams(), ...extra });
+  // Each list keeps its own page while the other one turns: both cursors belong to their own list (the changes cursor
+  // to the pair, the revisions cursor to HEAD), so carrying the other one is safe. Each first-page button still drops
+  // only its own cursor.
+  const changesNav = (extra: Record<string, string>) =>
+    nav({ from: shownFrom, to: shownTo, ...pickParams(), ...(params.cursor ? { cursor: params.cursor } : {}), ...extra });
   // A revisions page turn keeps the changes list on screen too: the pair that produced it travels with the cursor, so
   // only the revisions under it change.
   const revisionsNav = (extra: Record<string, string>) =>
-    nav({ ...pickParams(), ...(shownFrom && shownTo ? { from: shownFrom, to: shownTo } : {}), ...extra });
+    nav({
+      ...pickParams(),
+      ...(shownFrom && shownTo
+        ? { from: shownFrom, to: shownTo, ...(params.changesCursor ? { changesCursor: params.changesCursor } : {}) }
+        : {}),
+      ...extra,
+    });
   const historyMore = str(history.continuation);
   const changesMore = str(changes.continuation);
   const stop = str(history.stopReason);
