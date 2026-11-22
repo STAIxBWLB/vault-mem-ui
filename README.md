@@ -67,7 +67,7 @@ A release is one tag on a green `main`: the tag runs the checks again, packs onc
 
 ### The first publish
 
-`@staix/vault-mem-ui` has never been published (`npm view @staix/vault-mem-ui` answers 404), and npm's trusted publishing is configured on a package that already exists, which the flow here needs: the publish job has no npm token and reaches the registry only through OIDC. So the first release is three steps, all of them a person's:
+Done on 2026-11-22; kept as the record of how the package name was bootstrapped. npm's trusted publishing is configured on a package that already exists, which the flow here needs: the publish job has no npm token and reaches the registry only through OIDC. So the first release was three steps, all of them a person's:
 
 1. Bootstrap the package name once, from a clean `main` checkout that still holds the placeholder version `0.0.0`. `dist/` is not in git (it is ignored), so publishing the checkout would ship whatever build it happens to hold; run the gates and publish the bytes the smoke test installed instead:
 
@@ -83,7 +83,7 @@ A release is one tag on a green `main`: the tag runs the checks again, packs onc
 2. Attach the trusted publisher, the same configuration as the list below: `npm trust github @staix/vault-mem-ui --file release.yml --repository STAIxBWLB/vault-mem-ui --environment npm-production --allow-publish` (npm 12 has this command; `npm trust --help` lists its flags).
 3. Set `NPM_PUBLISH_ENABLED=true`. The release-prep PR then sets the first real version and its dated changelog section, and the first tag release publishes that version with provenance.
 
-Unverified from this repository, and none of it attempted here: whether the gated bootstrap publish in step 1 succeeds, whether a first publish under `--tag bootstrap` also sets `latest`, whether `npm trust` accepts a package before any release version exists rather than requiring one, and how long an unvalidated configuration lasts. What is measured: `npm view @staix/vault-mem-ui` answers 404, `dist/` is ignored by git, `npm trust github` takes exactly those flags in npm 12.2.2, `npm dist-tag` in npm 12.2.2 takes `add <package-spec (with version)> [<tag>]` and `ls [<package-spec>]`, and `scripts/package-smoke.ts` installs and runs a packed tarball (see the release PR).
+What the bootstrap showed: the publish needed the account's two-factor check in an interactive terminal (an agent shell without a TTY fails with `EOTP`), and the first publish under `--tag bootstrap` also set `latest` to `0.0.0`, so the dist-tags read `bootstrap: 0.0.0` and `latest: 0.0.0` until `0.1.0` moves `latest`. The registry took a few minutes to serve the new package after the publish printed `+ @staix/vault-mem-ui@0.0.0`. Still unverified: whether `npm trust` would accept a package with no published version, and how long an unvalidated configuration lasts. Also measured: `dist/` is ignored by git, `npm trust github` takes exactly those flags in npm 12.2.2, `npm dist-tag` in npm 12.2.2 takes `add <package-spec (with version)> [<tag>]` and `ls [<package-spec>]`, and `scripts/package-smoke.ts` installs and runs a packed tarball (see the release PR).
 
 The `Publish approved artifact with npm OIDC` job runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true`; `Publish the GitHub release` follows it. Settings a person configures once, none of which this repository sets up:
 

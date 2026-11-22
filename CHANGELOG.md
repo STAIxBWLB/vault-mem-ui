@@ -6,10 +6,17 @@ section. `## [Unreleased]` holds the work that no release has shipped yet.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-22
+
+Requires `@staix/vault-mem` 0.13.1.
+
 ### Added
 
 - The `acon` console plugin that keeps `@staix/vault-mem/ui-plugin` as its provider and serves this package's own panel bundle.
 - The client panels for vmem's overview, search, note, promote, lint, log, settings, proposals, assertions and history, the note body rendered as Markdown, and the graph view with its local view, shortest path, pins and level of detail.
+- The graph's decision chains mode, ordering notes along the provider's `supersedes` and `superseded_by` relations.
+- Typed link authoring from the graph inspector through the provider's two-step `link` action.
+- Offline export of the filtered graph as one self-contained HTML file.
 - The standalone `vmem-ui` host and its `bin` entry, serving the same bundle on loopback through the provider.
 - The import boundary check that keeps `src/` on the provider, and the third-party notices check on the bundle's inputs.
 - The tag-driven release workflow, its release scripts, and this changelog.
