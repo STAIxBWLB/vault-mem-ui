@@ -27,7 +27,7 @@ describe("graphTopologySignature", () => {
     { id: "c", label: "C" },
   ] as GraphNode[];
   const edges = [
-    { source: "a", target: "b", relation: "related", fromFrontmatter: true },
+    { source: "a", target: "b", relation: "related", fromFrontmatter: true, inferred: false },
   ] as GraphEdge[];
 
   it("ignores metadata-only node changes", () => {
@@ -37,7 +37,7 @@ describe("graphTopologySignature", () => {
 
   it("changes when same-cardinality topology changes", () => {
     const rewired = [
-      { source: "a", target: "c", relation: "related", fromFrontmatter: true },
+      { source: "a", target: "c", relation: "related", fromFrontmatter: true, inferred: false },
     ] as GraphEdge[];
     expect(graphTopologySignature(nodes, rewired)).not.toBe(
       graphTopologySignature(nodes, edges),

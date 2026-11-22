@@ -162,5 +162,5 @@ test("a schema-1 graph reply keeps the declaration, so the link control appears 
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Link notes: done");
   expect(body("alpha")).toContain("[[beta]] (supports)");
   // The graph the panel now holds was read again after the write, so the new edge is there.
-  expect((store.getState().reply?.graph as GraphInput).edges).toContainEqual({ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: false });
+  expect((store.getState().reply?.graph as GraphInput).edges).toContainEqual({ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: false, inferred: false });
 });

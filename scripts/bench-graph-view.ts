@@ -17,7 +17,7 @@ const input = {
   nodes: Array.from({ length: N }, (_, i) => ({ id: `n${i}`, label: `Note ${i}`, relPath: `notes/n${i}.md` })),
   edges: Array.from({ length: E }, (_, k) => {
     const i = k % N, hop = 1 + Math.floor(k / N);
-    return { source: `n${i}`, target: `n${(i + hop) % N}`, relation: "wiki_link", fromFrontmatter: false };
+    return { source: `n${i}`, target: `n${(i + hop) % N}`, relation: "wiki_link", fromFrontmatter: false, inferred: false };
   }),
 };
 const model = buildGraphModel(input, 0);

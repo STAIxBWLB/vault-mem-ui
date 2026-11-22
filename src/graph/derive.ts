@@ -233,7 +233,7 @@ export function deriveGraphView(args: {
 
   const keptNodeIds = new Set(model.nodes.filter((node) => pass(node)).map((node) => node.id));
   const nodeFilteredEdges = model.edges.filter(
-    (edge) => keptNodeIds.has(edge.source) && keptNodeIds.has(edge.target),
+    (edge) => keptNodeIds.has(edge.source) && keptNodeIds.has(edge.target) && (profile.showInferred !== false || !edge.inferred),
   );
   const relationCounts = new Map<string, number>();
   for (const edge of nodeFilteredEdges) {

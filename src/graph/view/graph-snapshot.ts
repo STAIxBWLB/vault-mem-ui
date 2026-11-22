@@ -50,13 +50,15 @@ async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params
       if (nodes.length !== start.totals.nodes || page.offset !== edges.length) return { error: "Graph edge pages are out of order; restart from the first page." };
       const c = page.columns as GraphEdgeColumns;
       if (!c || !Array.isArray(c.relations) || ![c.source, c.target, c.relation, c.field, c.rel].every((a) => Array.isArray(a) && a.length === page.count)) return { error: "Graph edge columns are invalid; restart from the first page." };
+      const tags = c.confidence_tag;
+      if (!(typeof tags === "string" && (tags === "EXTRACTED" || tags === "INFERRED")) && !(Array.isArray(tags) && tags.length === page.count && Array.from(tags).every((tag) => tag === "EXTRACTED" || tag === "INFERRED"))) return { error: "Graph edge columns are invalid; restart from the first page." };
       for (let i = 0; i < page.count; i++) {
         const source = c.source[i]!, target = c.target[i]!, relationIndex = c.relation[i]!;
         if (!Number.isSafeInteger(source) || !Number.isSafeInteger(target) || !Number.isSafeInteger(relationIndex) || !nodes[source] || !nodes[target] || typeof c.relations[relationIndex] !== "string") return { error: "Graph edge references are invalid; restart from the first page." };
         const kind = c.relations[relationIndex]!;
         // Both declarations describe newer superseding older; normalize before the model deduplicates reciprocal edges.
         const reverse = kind === "supersedes" && c.field[i] === "superseded_by";
-        edges.push({ source: nodes[reverse ? target : source]!.id, target: nodes[reverse ? source : target]!.id, relation: kind === "wiki_link" ? c.rel[i] || "wiki_link" : kind === "supersedes" ? "supersedes" : c.field[i] || kind, fromFrontmatter: kind !== "wiki_link" });
+        edges.push({ source: nodes[reverse ? target : source]!.id, target: nodes[reverse ? source : target]!.id, relation: kind === "wiki_link" ? c.rel[i] || "wiki_link" : kind === "supersedes" ? "supersedes" : c.field[i] || kind, fromFrontmatter: kind !== "wiki_link", inferred: (typeof tags === "string" ? tags : tags[i]) === "INFERRED" });
       }
     } else return { error: "Graph page kind is invalid; restart from the first page." };
     if (nodes.length > start.totals.nodes || edges.length > start.totals.edges) return { error: "Graph page totals are invalid; restart from the first page." };

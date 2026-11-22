@@ -12,6 +12,8 @@ export interface GraphFilterProfile {
   community: number | null;
   showUnresolved: boolean;
   showGenerated: boolean;
+  /** Include provider-marked inferred links. */
+  showInferred: boolean;
   /** Minimum distinct visible neighbors; 0 = all authored notes. */
   minVisibleNeighbors: number;
 }
@@ -61,4 +63,5 @@ export interface GraphInputEdge {
   /** Frontmatter field name, or "wiki_link" for a body link. */
   relation: string;
   fromFrontmatter: boolean;
+  inferred: boolean;
 }

@@ -35,6 +35,7 @@ export interface GraphEdge {
   /** frontmatter field name, or "wiki_link" for body links. */
   relation: string;
   fromFrontmatter: boolean;
+  inferred: boolean;
   origin: GraphEdgeOrigin;
 }
 
@@ -117,21 +118,24 @@ export function buildGraphModel(input: GraphInput, builtAt: number = Date.now())
   };
 
   const edges: GraphEdge[] = [];
-  const seenEdges = new Set<string>();
+  const seenEdges = new Map<string, GraphEdge>();
   for (const e of input.edges) {
     if (e.source === e.target) continue;
     const key = `${e.source}\u0000${e.target}\u0000${e.relation}`;
-    if (seenEdges.has(key)) continue;
-    seenEdges.add(key);
+    const existing = seenEdges.get(key);
+    if (existing) { if (e.inferred !== true) existing.inferred = false; continue; }
     ensure(e.source);
     ensure(e.target);
-    edges.push({
+    const edge: GraphEdge = {
       source: e.source,
       target: e.target,
       relation: e.relation,
       fromFrontmatter: e.fromFrontmatter,
+      inferred: e.inferred === true,
       origin: edgeOrigin(nodes.get(e.source)!.origin, nodes.get(e.target)!.origin),
-    });
+    };
+    seenEdges.set(key, edge);
+    edges.push(edge);
   }
 
   for (const edge of edges) {

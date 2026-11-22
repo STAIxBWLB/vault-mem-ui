@@ -88,7 +88,7 @@ const ring = (n: number, chords = 0): GraphInput => ({
   // Distinct pairs (the model merges duplicates): node i links to i+1, i+2, ... until the edge count is reached.
   edges: Array.from({ length: n + chords }, (_, k) => {
     const i = k % n, hop = 1 + Math.floor(k / n);
-    return { source: `n${i}`, target: `n${(i + hop) % n}`, relation: "wiki_link", fromFrontmatter: false };
+    return { source: `n${i}`, target: `n${(i + hop) % n}`, relation: "wiki_link", fromFrontmatter: false, inferred: false };
   }),
 });
 

@@ -92,8 +92,8 @@ const graph = {
     { id: "c", label: "Gamma", relPath: null },
   ],
   edges: [
-    { source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false },
-    { source: "b", target: "c", relation: "wiki_link", fromFrontmatter: false },
+    { source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+    { source: "b", target: "c", relation: "wiki_link", fromFrontmatter: false, inferred: false },
   ],
 };
 
@@ -110,6 +110,43 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("hiding inferred links updates the canvas view and exported graph", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    let blob: Blob | undefined;
+    const create = spyOn(URL, "createObjectURL").mockImplementation((value) => { blob = value as Blob; return "blob:synthetic"; });
+    const click = spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    try {
+      await mount({ graph: { ...graph, edges: [{ ...graph.edges[0]!, inferred: false }, { ...graph.edges[1]!, inferred: true }] } });
+      expect(container.textContent).toContain("2 links");
+      const inferredColor = fake.edgeAttrs.get("e1")!.color;
+      expect(inferredColor).not.toBe(fake.edgeAttrs.get("e0")!.color);
+      await act(async () => fake.handlers.get("clickNode")!({ node: "b" }));
+      expect(container.textContent).toContain("wiki_link, inferred");
+      const edgeReducer = fake.settings.edgeReducer as (id: string, attrs: Record<string, unknown>) => Record<string, unknown>;
+      expect(edgeReducer("e1", fake.edgeAttrs.get("e1")!).color).toBe(inferredColor);
+      const toggle = [...container.querySelectorAll("label")].find((label) => label.textContent?.includes("Show inferred links"))!.querySelector("input")!;
+      expect(toggle.checked).toBe(true);
+      await act(async () => toggle.click());
+      expect(container.textContent).toContain("1 links");
+      expect(edgeReducer("e1", fake.edgeAttrs.get("e1")!).hidden).toBe(true);
+      await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Export filtered graph HTML")!.click(); });
+      const html = await blob!.text();
+      const packet = JSON.parse(html.match(/<script id="graph-data" type="application\/json">([^<]*)<\/script>/)![1]!);
+      const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0))));
+      expect(data.edges).toEqual([{ source: "a", target: "b", relation: "wiki_link", inferred: false }]);
+    } finally { create.mockRestore(); click.mockRestore(); }
+  });
+
+  test("empty chains export directs the person to Global view", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph });
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
+    const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Export filtered graph HTML")!;
+    expect(button.disabled).toBe(true);
+    expect(container.textContent).toContain("No decision nodes match; choose Global view to export.");
+  });
   test("visible graph export captures current positions while layout runs", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
@@ -136,7 +173,7 @@ describe("GraphPanel", () => {
       const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0))));
       expect(data.nodes.map((node: { id: string }) => node.id)).toEqual(["a", "b"]);
       expect(data.nodes.map((node: { position: number[] }) => node.position)).toEqual([[11, 12], [13, 14]]);
-      expect(data.edges).toEqual([{ source: "a", target: "b", relation: "wiki_link" }]);
+      expect(data.edges).toEqual([{ source: "a", target: "b", relation: "wiki_link", inferred: false }]);
       expect(html).not.toContain("SYNTHETIC_BODY_NOT_EXPORTED");
       expect(JSON.stringify(data)).not.toContain("SYNTHETIC_BODY_NOT_EXPORTED");
     } finally { create.mockRestore(); click.mockRestore(); }
@@ -177,7 +214,7 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     const nodes = ["alpha", "beta", "omega", "zeta"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, type: "decision" }));
-    const edges = [["alpha", "beta"], ["omega", "zeta"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true }));
+    const edges = [["alpha", "beta"], ["omega", "zeta"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true, inferred: false }));
     await mount({ graph: { nodes, edges } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
@@ -198,7 +235,7 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id === "a" ? "Alpha" : id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision", domain: id === "a" ? "x" : "y" }));
-    const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true }));
+    const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true, inferred: false }));
     await mount({ graph: { nodes, edges } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
@@ -219,7 +256,7 @@ describe("GraphPanel", () => {
   test("graphs without supersedes edges explain the empty chain view", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
-    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md", type: "decision" }, { id: "b", label: "B", relPath: "notes/b.md", type: "decision" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false }] } });
+    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md", type: "decision" }, { id: "b", label: "B", relPath: "notes/b.md", type: "decision" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false, inferred: false }] } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     expect(container.textContent).toContain("This graph has no supersedes edges");
     expect(container.querySelector('[aria-label="Decision chains"]')?.textContent).not.toContain("Focus chain:");
@@ -232,7 +269,7 @@ describe("GraphPanel", () => {
     await mount({ graph: { nodes: [
       { id: "first", label: "First", relPath: "notes/first.md", type: "decision", date: "2025-01-01" },
       { id: "second", label: "Second", relPath: "notes/second.md", type: "decision", date: "2026-01-01" },
-    ], edges: [{ source: "second", target: "first", relation: "supersedes", fromFrontmatter: true }] } }, (panel, params) => opened.push({ panel, params }));
+    ], edges: [{ source: "second", target: "first", relation: "supersedes", fromFrontmatter: true, inferred: false }] } }, (panel, params) => opened.push({ panel, params }));
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const focus = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Focus chain: First → Second"))!;
     expect(focus).toBeDefined();
@@ -290,7 +327,7 @@ describe("GraphPanel", () => {
   test("an edge to an absent note keeps the link and draws the target as an unresolved ghost", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
-    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false }] } });
+    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false, inferred: false }] } });
     await flush();
     expect([...fake.attrs.keys()].sort()).toEqual(["a", "missing"]);
     expect(container.textContent).toContain("2 notes · 1 links");

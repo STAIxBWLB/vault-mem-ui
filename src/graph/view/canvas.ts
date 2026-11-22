@@ -109,6 +109,7 @@ export function mountGraphCanvas(
       sourceId: edge.source,
       targetId: edge.target,
       visibilityKey: graphEdgeVisibilityKey(edge),
+      inferred: edge.inferred,
     });
   });
 
@@ -170,7 +171,7 @@ export function mountGraphCanvas(
       if (s.mode !== "chains" && s.lod.edgeStride > 1 && !onPath && !hovered && !touchesFocus && (data.index as number) % s.lod.edgeStride !== 0) {
         return { ...data, hidden: true };
       }
-      if (onPath || onChain || hovered || touchesFocus) return { ...data, color: theme.accent, size: Math.max(1.4, data.size as number) };
+      if (onPath || onChain || hovered || touchesFocus) return { ...data, color: data.inferred === true ? theme.warn : theme.accent, size: Math.max(1.4, data.size as number) };
       if (pathEdges.size > 0 || s.chainFocusIds.size > 0 || s.hoverId !== null) return { ...data, color: theme.edgeDim };
       return data;
     },

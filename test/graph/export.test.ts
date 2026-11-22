@@ -5,7 +5,7 @@ import { runInNewContext } from "node:vm";
 
 test("export encodes hostile labels as inert JSON and includes only graph metadata", () => {
   const hostile = '</script><script>alert("x")</script><!-- 한글';
-  const model = buildGraphModel({ nodes: [{ id: hostile, label: hostile, relPath: "notes/private.md", type: "insight", domain: "research" }, { id: "b", label: "Beta", relPath: "notes/b.md" }], edges: [{ source: hostile, target: "b", relation: hostile, fromFrontmatter: false }], communities: { b: 3 } }, 1);
+  const model = buildGraphModel({ nodes: [{ id: hostile, label: hostile, relPath: "notes/private.md", type: "insight", domain: "research" }, { id: "b", label: "Beta", relPath: "notes/b.md" }], edges: [{ source: hostile, target: "b", relation: hostile, fromFrontmatter: false, inferred: false }], communities: { b: 3 } }, 1);
   const html = exportGraphHtml(model, { [hostile]: [1, 2] });
   expect(html).toBe(exportGraphHtml(model, { [hostile]: [1, 2] }));
   expect(html).not.toContain(hostile);
@@ -14,7 +14,7 @@ test("export encodes hostile labels as inert JSON and includes only graph metada
   const packet = JSON.parse(html.match(/<script id="graph-data" type="application\/json">([^<]*)<\/script>/)![1]!);
   const decoded = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (c) => c.charCodeAt(0))));
   expect(decoded.nodes[0]).toEqual({ id: hostile, label: hostile, type: "insight", domain: "research", community: null, degree: 1, position: [1, 2] });
-  expect(decoded.edges[0]).toEqual({ source: hostile, target: "b", relation: hostile });
+  expect(decoded.edges[0]).toEqual({ source: hostile, target: "b", relation: hostile, inferred: false });
 });
 
 test("offline canvas draws higher graph y above lower graph y", () => {
@@ -28,4 +28,13 @@ test("offline canvas draws higher graph y above lower graph y", () => {
   runInNewContext(script, { document, TextDecoder, Uint8Array, atob });
   expect(points).toHaveLength(2);
   expect(points[1]![1]!).toBeLessThan(points[0]![1]!);
+});
+
+test("offline graph preserves and marks inferred links", () => {
+  const model = buildGraphModel({ nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }, { id: "b", label: "B", relPath: "notes/b.md" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false, inferred: true }] });
+  const html = exportGraphHtml(model, {});
+  const packet = JSON.parse(html.match(/<script id="graph-data" type="application\/json">([^<]*)<\/script>/)![1]!);
+  const decoded = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(packet.data), (char) => char.charCodeAt(0))));
+  expect(decoded.edges).toEqual([{ source: "a", target: "b", relation: "wiki_link", inferred: true }]);
+  expect(html).toContain("Inferred links are amber");
 });

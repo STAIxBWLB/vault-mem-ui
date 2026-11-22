@@ -28,7 +28,7 @@ export function readGraphInput(value: unknown): GraphInput | null {
   if (!Array.isArray(v.nodes) || !Array.isArray(v.edges)) return null;
   const nodes = v.nodes.filter((n) => n && typeof n.id === "string" && typeof n.label === "string");
   const edges = v.edges.filter((e) => e && typeof e.source === "string" && typeof e.target === "string" && typeof e.relation === "string");
-  return { nodes: nodes.map((n) => ({ ...n, relPath: typeof n.relPath === "string" ? n.relPath : null })), edges: edges.map((e) => ({ ...e, fromFrontmatter: e.fromFrontmatter === true })), ...(v.communities ? { communities: v.communities } : {}) };
+  return { nodes: nodes.map((n) => ({ ...n, relPath: typeof n.relPath === "string" ? n.relPath : null })), edges: edges.map((e) => ({ ...e, fromFrontmatter: e.fromFrontmatter === true, inferred: e.inferred === true })), ...(v.communities ? { communities: v.communities } : {}) };
 }
 
 export interface GraphEnv {
@@ -232,6 +232,11 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
   }, [model, navigate, params]);
   const focusChain = useCallback((ids: string[]) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }, [store]);
+  let exportDisabledReason: string | undefined;
+  if (canvasError) exportDisabledReason = "Export unavailable: the graph canvas could not start.";
+  else if (!canvasReady) exportDisabledReason = "Export is available when the graph canvas is ready.";
+  else if (!state.derived.visibleModel.nodes.length && state.mode === "chains") exportDisabledReason = "No decision nodes match; choose Global view to export.";
+  else if (!state.derived.visibleModel.nodes.length) exportDisabledReason = "No nodes match; clear filters or search to export.";
   // A proposed link is a write like any other: the store previews it through the provider's two-step action and the
   // shared dialog confirms it, so the control is only offered when the provider declares that action.
   const link = useMemo<LinkProposal | undefined>(() => (canLink ? { propose: (input) => beginWrite(linkAction({ ...input, ...vaultParam(params) })) } : undefined), [canLink, beginWrite, params]);
@@ -240,7 +245,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKe
     <section className="vmem-graph" aria-label="Vault graph">
       <div className="vmem-graph-bar" role="toolbar" aria-label="Graph controls">
         <span className="vmem-sub">{state.derived.visibleModel.nodes.length} notes · {state.derived.visibleModel.edges.length} links{model.edges.length > LOD_EDGE_THRESHOLD ? " · large graph, detail reduced while moving" : ""}</span>
-        <GraphExportButton model={state.derived.visibleModel} positions={readVisiblePositions} disabledReason={canvasError ? "Export unavailable: the graph canvas could not start." : !canvasReady ? "Export is available when the graph canvas is ready." : !state.derived.visibleModel.nodes.length ? "No nodes match; clear filters or search to export." : undefined} />
+        <GraphExportButton model={state.derived.visibleModel} positions={readVisiblePositions} disabledReason={exportDisabledReason} />
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>

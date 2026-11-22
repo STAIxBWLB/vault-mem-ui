@@ -21,9 +21,9 @@ const input: GraphInput = {
     { id: "e", label: "E", relPath: null },
   ],
   edges: [
-    { source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false },
-    { source: "b", target: "c", relation: "related", fromFrontmatter: true },
-    { source: "c", target: "e", relation: "wiki_link", fromFrontmatter: false },
+    { source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+    { source: "b", target: "c", relation: "related", fromFrontmatter: true, inferred: false },
+    { source: "c", target: "e", relation: "wiki_link", fromFrontmatter: false, inferred: false },
   ],
 };
 
@@ -66,9 +66,9 @@ describe("graph view store", () => {
       { id: "d3", label: "Solo", relPath: "notes/d3.md", type: "decision" },
       { id: "n", label: "Other", relPath: "notes/n.md", type: "insight" },
     ], edges: [
-      { source: "d1", target: "d2", relation: "supersedes", fromFrontmatter: true },
-      { source: "d1", target: "d2", relation: "wiki_link", fromFrontmatter: false },
-      { source: "d2", target: "n", relation: "wiki_link", fromFrontmatter: false },
+      { source: "d1", target: "d2", relation: "supersedes", fromFrontmatter: true, inferred: false },
+      { source: "d1", target: "d2", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+      { source: "d2", target: "n", relation: "wiki_link", fromFrontmatter: false, inferred: false },
     ] });
     const store = createGraphViewStore(chainModel);
     store.setMode("chains");
@@ -145,7 +145,7 @@ describe("graph view store", () => {
   test("local centre survives selection, profile and search changes", () => {
     const chain = buildGraphModel({
       nodes: ["a", "b", "c", "d", "e"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, domain: id === "a" || id === "b" ? "x" : "y" })),
-      edges: [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"]].map(([source, target]) => ({ source: source!, target: target!, relation: "related", fromFrontmatter: false })),
+      edges: [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"]].map(([source, target]) => ({ source: source!, target: target!, relation: "related", fromFrontmatter: false, inferred: false })),
     }, 0);
     const store = createGraphViewStore(chain);
     store.openLocal("a", 1);
@@ -183,7 +183,7 @@ describe("graph view store", () => {
   test("path and no-path notice are recomputed when visible edges change", () => {
     const route = buildGraphModel({
       nodes: ["a", "b", "c", "d"].map((id) => ({ id, label: id, relPath: `notes/${id}.md` })),
-      edges: [["a", "b", "wiki_link"], ["b", "c", "wiki_link"], ["c", "d", "wiki_link"], ["a", "d", "related"]].map(([source, target, relation]) => ({ source: source!, target: target!, relation: relation!, fromFrontmatter: false })),
+      edges: [["a", "b", "wiki_link"], ["b", "c", "wiki_link"], ["c", "d", "wiki_link"], ["a", "d", "related"]].map(([source, target, relation]) => ({ source: source!, target: target!, relation: relation!, fromFrontmatter: false, inferred: false })),
     }, 0);
     const store = createGraphViewStore(route);
     store.setProfile({ ...store.getState().profile, relations: ["related"] });
@@ -271,8 +271,8 @@ describe("readGraphInput", () => {
   });
   test("drops malformed nodes and edges but keeps edges to absent nodes for ghost creation", () => {
     const got = readGraphInput({ nodes: [{ id: "a", label: "A" }, { id: 3 }], edges: [{ source: "a", target: "x", relation: "r" }, { source: "a", target: 5, relation: "r" }] });
-    expect(got).toEqual({ nodes: [{ id: "a", label: "A", relPath: null }], edges: [{ source: "a", target: "x", relation: "r", fromFrontmatter: false }] });
-    const model = buildGraphModel(readGraphInput({ nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false }] })!, 0);
+    expect(got).toEqual({ nodes: [{ id: "a", label: "A", relPath: null }], edges: [{ source: "a", target: "x", relation: "r", fromFrontmatter: false, inferred: false }] });
+    const model = buildGraphModel(readGraphInput({ nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }], edges: [{ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false, inferred: false }] })!, 0);
     expect(model.edges).toHaveLength(1);
     expect(model.nodes.find((n) => n.id === "missing")).toMatchObject({ relPath: null });
   });

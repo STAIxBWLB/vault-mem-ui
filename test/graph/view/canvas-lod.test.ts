@@ -39,7 +39,7 @@ function harness(input: GraphInput) {
 const n = LOD_EDGE_THRESHOLD + 2;
 const star: GraphInput = {
   nodes: Array.from({ length: n }, (_, i) => ({ id: `n${i}`, label: `N${i}`, relPath: `notes/n${i}.md` })),
-  edges: Array.from({ length: n - 1 }, (_, i) => ({ source: `n${i + 1}`, target: i % 2 ? "n0" : `n${(i + 2) % n}`, relation: "wiki_link", fromFrontmatter: false })),
+  edges: Array.from({ length: n - 1 }, (_, i) => ({ source: `n${i + 1}`, target: i % 2 ? "n0" : `n${(i + 2) % n}`, relation: "wiki_link", fromFrontmatter: false, inferred: false })),
 };
 
 test("a reduced view draws a stride sample but keeps edges the person is looking at", () => {
@@ -64,7 +64,7 @@ test("chain mode keeps every supersedes edge and highlights the selected chain",
   const count = 1000, edgeCount = LOD_EDGE_THRESHOLD + 1;
   const input: GraphInput = {
     nodes: Array.from({ length: count }, (_, i) => ({ id: `n${i}`, label: `N${i}`, relPath: `notes/n${i}.md`, type: "decision" })),
-    edges: Array.from({ length: edgeCount }, (_, i) => ({ source: `n${i % count}`, target: `n${(i % count + Math.floor(i / count) + 1) % count}`, relation: "supersedes", fromFrontmatter: true })),
+    edges: Array.from({ length: edgeCount }, (_, i) => ({ source: `n${i % count}`, target: `n${(i % count + Math.floor(i / count) + 1) % count}`, relation: "supersedes", fromFrontmatter: true, inferred: false })),
   };
   const { store, canvas, visible, node, edge } = harness(input);
   store.setMode("chains"); canvas.update(store.getState());

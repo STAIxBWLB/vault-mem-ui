@@ -135,11 +135,27 @@ describe("graph theme", () => {
     expect(refreshGraphTheme().originColors.workspace).not.toBe(light);
   });
 
+  it("uses a distinct inferred edge color with contrast in light and dark themes", () => {
+    const luminance = (hex: string) => {
+      const channels = [1, 3, 5].map((index) => parseInt(hex.slice(index, index + 2), 16) / 255).map((v) => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+      return channels[0]! * 0.2126 + channels[1]! * 0.7152 + channels[2]! * 0.0722;
+    };
+    for (const tokens of [LIGHT, DARK]) {
+      setTokens(tokens); const theme = refreshGraphTheme();
+      const edge = { relation: "wiki_link", fromFrontmatter: false, inferred: false, origin: "knowledge" as const };
+      const display = { relationColors: false, colorMode: "neutral" as const };
+      const inferred = edgeColor({ ...edge, inferred: true }, display);
+      expect(inferred).not.toBe(edgeColor(edge, display));
+      const a = luminance(inferred), b = luminance(theme.bg);
+      expect((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
   it("edgeColor keys the three origin classes and leaves other modes alone", () => {
     const theme = refreshGraphTheme();
     const origin = { relationColors: false, colorMode: "origin" } as const;
     const classes = (["workspace", "knowledge", "cross"] as const).map((value) =>
-      edgeColor({ relation: "wiki_link", fromFrontmatter: false, origin: value }, origin),
+      edgeColor({ relation: "wiki_link", fromFrontmatter: false, inferred: false, origin: value }, origin),
     );
     expect(new Set(classes).size).toBe(3);
     expect(classes).toEqual([
@@ -150,7 +166,7 @@ describe("graph theme", () => {
     // Edges stay subordinate to their nodes.
     expect(classes[0]).not.toBe(theme.originColors.workspace);
 
-    const edge = { relation: "supersedes", fromFrontmatter: true, origin: "cross" } as const;
+    const edge = { relation: "supersedes", fromFrontmatter: true, inferred: false, origin: "cross" } as const;
     expect(edgeColor(edge, { relationColors: false, colorMode: "neutral" })).toBe(theme.edge);
     expect(edgeColor(edge, { relationColors: true, colorMode: "neutral" })).toBe(
       relationColor("supersedes"),

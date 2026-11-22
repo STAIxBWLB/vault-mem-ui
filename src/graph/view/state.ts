@@ -47,7 +47,7 @@ export interface GraphViewState {
 
 export const OPEN_PROFILE: GraphFilterProfile = {
   domains: [], origins: [], types: [], relations: [], community: null,
-  showUnresolved: true, showGenerated: true, minVisibleNeighbors: 0,
+  showUnresolved: true, showGenerated: true, showInferred: true, minVisibleNeighbors: 0,
 };
 
 export interface GraphViewStore {
