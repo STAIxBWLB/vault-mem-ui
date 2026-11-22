@@ -15,19 +15,19 @@ export async function assembleSemanticPages(snapshot: Host["snapshot"], vault: s
   for (;;) {
     const reply = await snapshot({ panel: "graph", vault, semantic: SEMANTIC_DEFAULTS, ...(pageToken ? { page: pageToken } : {}) });
     if (!active()) return { error: "Semantic layout request was cancelled." };
-    if (typeof reply.error === "string") return { error: reply.error };
+    if (typeof reply.error === "string") return { error: CHANGED.test(reply.error) ? "Graph changed while loading semantic layout; turn Semantic layout on again." : reply.error };
     const page = reply as unknown as SemanticGraphPage;
-    if (page.schema !== 1 || page.kind !== "semantic" || page.vault !== vault || page.revision !== revision) return { error: "Graph changed while loading semantic layout; restart from the first page." };
+    if (page.schema !== 1 || page.kind !== "semantic" || page.vault !== vault || page.revision !== revision) return { error: "Graph changed while loading semantic layout; turn Semantic layout on again." };
     const c = page.semantic;
-    if (!Number.isSafeInteger(page.offset) || page.offset !== edges.length || !Number.isSafeInteger(page.count) || page.count < 0 || !c || ![c.source, c.target, c.score].every((column) => Array.isArray(column) && column.length === page.count)) return { error: "Semantic graph page is invalid; restart from the first page." };
+    if (!Number.isSafeInteger(page.offset) || page.offset !== edges.length || !Number.isSafeInteger(page.count) || page.count < 0 || !c || ![c.source, c.target, c.score].every((column) => Array.isArray(column) && column.length === page.count)) return { error: "Semantic graph page is invalid; update @staix/vault-mem or report its version." };
     if (edges.length + page.count > nodeCount * SEMANTIC_DEFAULTS.k) return { error: "Semantic graph page exceeds the supported number of similarity pairs; update @staix/vault-mem or report its version." };
     for (let i = 0; i < page.count; i++) {
       const source = c.source[i]!, target = c.target[i]!, score = c.score[i]!;
-      if (!Number.isSafeInteger(source) || source < 0 || source >= nodeCount || !Number.isSafeInteger(target) || target < 0 || target >= nodeCount || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) return { error: "Semantic graph page is invalid; restart from the first page." };
+      if (!Number.isSafeInteger(source) || source < 0 || source >= nodeCount || !Number.isSafeInteger(target) || target < 0 || target >= nodeCount || typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > 1) return { error: "Semantic graph page is invalid; update @staix/vault-mem or report its version." };
       edges.push({ source, target, score });
     }
     if (page.next === null) return { edges };
-    if (typeof page.next !== "string" || !page.next || seen.has(page.next) || !page.count) return { error: "Semantic graph page is invalid; restart from the first page." };
+    if (typeof page.next !== "string" || !page.next || seen.has(page.next) || !page.count) return { error: "Semantic graph page is invalid; update @staix/vault-mem or report its version." };
     seen.add(page.next); pageToken = page.next;
   }
 }

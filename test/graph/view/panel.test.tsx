@@ -111,7 +111,7 @@ const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0))
 
 describe("GraphPanel", () => {
   test("enrichment is optional, and similar notes load only after selecting a note", async () => {
-    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
     const calls: Record<string, unknown>[] = [];
     const query = async (input: Record<string, unknown>) => { calls.push(input); return { similar: [{ path: "b.md", title: "Beta", score: 0.91 }] }; };
     await mount({ graph }, () => {}, undefined, { graphSnapshot: query });
@@ -137,16 +137,18 @@ describe("GraphPanel", () => {
     expect(container.querySelector('[aria-label="Graph inspector"]')?.textContent).toContain(error);
   });
 
-  test("a changed semantic revision offers the first graph page", async () => {
-    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
-    const navigated: unknown[] = [];
-    await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, (panel, params) => navigated.push([panel, params]), undefined, { graphSnapshot: async () => ({ schema: 1, kind: "semantic", vault: "work", revision: "new", offset: 0, count: 0, semantic: { source: [], target: [], score: [] }, next: null }) });
+  test("a changed semantic revision explains retry and clears when graph revision changes", async () => {
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    const query = async () => ({ schema: 1, kind: "semantic", vault: "work", revision: "new", offset: 0, count: 0, semantic: { source: [], target: [], score: [] }, next: null });
+    const reply = { graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } };
+    await mount(reply, () => {}, undefined, { graphSnapshot: query });
+    await act(async () => FakeWorker.last!.emit({ type: "ready" }));
     await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click());
     await flush();
-    expect(container.textContent).toContain("restart from the first page");
-    expect(container.querySelector<HTMLButtonElement>('button[aria-pressed="false"]') !== null).toBe(true);
-    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "First page")!.click());
-    expect(navigated).toEqual([["graph", { vault: "work" }]]);
+    expect(container.textContent).toContain("turn Semantic layout on again");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "First page")).toBe(false);
+    await act(async () => root!.render(<GraphPanel reply={{ ...reply, graphStats: { vault: "work", revision: "new" } }} params={{}} navigate={() => {}} beginWrite={() => {}} graphSnapshot={query} />));
+    expect(container.textContent).not.toContain("Graph changed while loading semantic layout");
   });
 
   test("semantic springs reach only the worker, not canvas edges or export", async () => {
@@ -164,6 +166,8 @@ describe("GraphPanel", () => {
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click(); }); await flush();
     const worker = FakeWorker.last!;
     expect(worker).not.toBe(first);
+    expect(first.terminated).toBe(true);
+    expect(fake.killed).toBe(false);
     const init = worker.sent.find((message) => message.type === "init")!;
     if (init.type !== "init") throw new Error("missing worker init");
     expect([...init.graph.sources]).toEqual([0, 1, 0]);
@@ -180,6 +184,66 @@ describe("GraphPanel", () => {
     expect(data.edges).toHaveLength(2);
     expect(data.edges.some((edge: { source: string; target: string }) => edge.source === "a" && edge.target === "c")).toBe(false);
     } finally { create.mockRestore(); click.mockRestore(); }
+  });
+
+  test("semantic positions stay out of the plain cache while pins persist", async () => {
+    const fake = fakeCanvas(); const data = new Map<string, string>();
+    const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
+    configureGraph({ moduleUrl: "x", storage, canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    const query = async () => ({ schema: 1, kind: "semantic", vault: "work", revision: "rev", offset: 0, count: 1, semantic: { source: [0], target: [1], score: [0.8] }, next: null });
+    await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
+    const first = FakeWorker.last!;
+    await act(async () => { first.emit({ type: "ready" }); first.emit({ type: "positions", positions: new Float32Array([1, 2, 3, 4, 5, 6]), iterations: 1 }); });
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click()); await flush();
+    const worker = FakeWorker.last!;
+    const init = worker.sent.find((message) => message.type === "init")!;
+    if (init.type !== "init") throw new Error("missing worker init");
+    expect([...init.graph.positions]).toEqual([1, 2, 3, 4, 5, 6]);
+    await act(async () => { worker.emit({ type: "ready" }); worker.emit({ type: "positions", positions: new Float32Array([11, 12, 13, 14, 15, 16]), iterations: 1 }); });
+    await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Pin")!.click());
+    const cached = JSON.parse([...data.values()][0]!);
+    expect(cached.positions.a).toEqual([1, 2]);
+    expect(cached.pinned).toContain("a");
+    expect(fake.killed).toBe(false);
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click()); await flush();
+    const plain = FakeWorker.last!;
+    const plainInit = plain.sent.find((message) => message.type === "init")!;
+    if (plainInit.type !== "init") throw new Error("missing worker init");
+    expect([...plainInit.graph.positions]).toEqual([11, 12, 13, 14, 15, 16]);
+    expect(plainInit.graph.fixed![0]).toBe(1);
+    expect(worker.terminated).toBe(true);
+    expect(fake.killed).toBe(false);
+  });
+
+  test("semantic layout is unavailable without a worker", async () => {
+    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph, enrichment: { model: null, embedded: 0, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: async () => ({}) });
+    await flush();
+    expect(container.textContent).toContain("cached positions only");
+    expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Semantic layout")).toBe(false);
+  });
+
+  test("a revision refresh keeps the canvas and semantic cache isolation while new pages load", async () => {
+    const fake = fakeCanvas(); const data = new Map<string, string>();
+    const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } };
+    configureGraph({ moduleUrl: "x", storage, canvasDeps: async () => fake.deps, createWorker: () => new FakeWorker() as unknown as Worker });
+    let resolvePage: (value: SnapshotReply) => void = () => {};
+    let calls = 0;
+    const query = async () => ++calls === 1 ? { schema: 1, kind: "semantic", vault: "work", revision: "rev", offset: 0, count: 1, semantic: { source: [0], target: [1], score: [0.8] }, next: null } : new Promise<SnapshotReply>((resolve) => { resolvePage = resolve; });
+    const reply = { graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } };
+    await mount(reply, () => {}, undefined, { graphSnapshot: query });
+    await act(async () => { FakeWorker.last!.emit({ type: "ready" }); FakeWorker.last!.emit({ type: "positions", positions: new Float32Array([1, 2, 3, 4, 5, 6]), iterations: 1 }); });
+    await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click()); await flush();
+    const semanticWorker = FakeWorker.last!;
+    await act(async () => { semanticWorker.emit({ type: "ready" }); semanticWorker.emit({ type: "positions", positions: new Float32Array([11, 12, 13, 14, 15, 16]), iterations: 1 }); });
+    await act(async () => root!.render(<GraphPanel reply={{ ...reply, graphStats: { vault: "work", revision: "new" } }} params={{}} navigate={() => {}} beginWrite={() => {}} graphSnapshot={query} />));
+    expect(FakeWorker.last).toBe(semanticWorker);
+    expect(fake.killed).toBe(false);
+    expect(JSON.parse([...data.values()][0]!).positions.a).toEqual([1, 2]);
+    await act(async () => resolvePage({ schema: 1, kind: "semantic", vault: "work", revision: "new", offset: 0, count: 0, semantic: { source: [], target: [], score: [] }, next: null }));
+    expect(FakeWorker.last).not.toBe(semanticWorker);
+    expect(fake.killed).toBe(false);
   });
   test("hiding inferred links updates the canvas view and exported graph", async () => {
     const fake = fakeCanvas();

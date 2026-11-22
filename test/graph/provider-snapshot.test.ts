@@ -167,7 +167,7 @@ test("semantic pages assemble in order and refuse a changed revision", async () 
   const query = async (input: Record<string, unknown>) => { calls.push(input); return input.page ? make(1, null) : make(0, "next"); };
   expect(await assembleSemanticPages(query, "test", "rev", 2)).toEqual({ edges: [{ source: 0, target: 1, score: 0.9 }, { source: 0, target: 1, score: 0.9 }] });
   expect(calls).toEqual([{ panel: "graph", vault: "test", semantic: SEMANTIC_DEFAULTS }, { panel: "graph", vault: "test", semantic: SEMANTIC_DEFAULTS, page: "next" }]);
-  expect(await assembleSemanticPages(async (input) => input.page ? { ...make(1, null), revision: "other" } : make(0, "next"), "test", "rev", 2)).toEqual({ error: "Graph changed while loading semantic layout; restart from the first page." });
+  expect(await assembleSemanticPages(async (input) => input.page ? { ...make(1, null), revision: "other" } : make(0, "next"), "test", "rev", 2)).toEqual({ error: "Graph changed while loading semantic layout; turn Semantic layout on again." });
 });
 
 test("semantic pair limit scales with graph size", async () => {
