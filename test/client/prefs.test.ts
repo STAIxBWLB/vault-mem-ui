@@ -110,7 +110,7 @@ describe("browserStorage", () => {
 
 describe("isPanelId", () => {
   test("accepts exactly the panels the client renders", () => {
-    for (const id of ["overview", "notes", "note", "promote", "lint", "log", "graph", "settings", "proposals"]) expect(isPanelId(id)).toBe(true);
-    for (const id of ["timeline", "", "Overview", 7, null, undefined]) expect(isPanelId(id)).toBe(false);
+    for (const id of ["overview", "notes", "note", "promote", "lint", "log", "graph", "settings", "proposals", "assertions", "history"]) expect(isPanelId(id)).toBe(true);
+    for (const id of ["timeline", "revisions", "", "Overview", 7, null, undefined]) expect(isPanelId(id)).toBe(false);
   });
 });

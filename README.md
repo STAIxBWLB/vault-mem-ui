@@ -12,7 +12,7 @@ For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run ch
 
 ## Client
 
-`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint, log, settings and proposals. It is written against one small host interface and runs in both hosts from the same bundle. Settings edits write permission, graph resolution and enrichment for the selected vault, and the default vault and PII patterns for all vaults. Every change is previewed and confirmed; default vault and permission changes require restarting the console and MCP server. Proposals can be listed, inspected, applied or rejected with a preview and confirmation.
+`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint, log, settings, proposals, assertions and history. It is written against one small host interface and runs in both hosts from the same bundle. Settings edits write permission, graph resolution and enrichment for the selected vault, and the default vault and PII patterns for all vaults. Every change is previewed and confirmed; default vault and permission changes require restarting the console and MCP server. Proposals can be listed, inspected, applied or rejected with a preview and confirmation. Assertions shows the journal's answer for the vault with every coverage gap named, and History shows a note's revisions plus the changes between two of them picked from that list; both are read-only.
 
 Reconciling an `apply_unknown` proposal and reading beyond truncated proposal content are available through the vmem CLI.
 
@@ -51,7 +51,7 @@ The vault it serves is the one vmem resolves for this process, not `$AGENTHUB_HO
 - API: `POST /api/snapshot` and `POST /api/action` relay to the provider. A snapshot names one of the manifest's panels, plus `inbox` and `search` when the plugin advertises those capabilities; `after` is how many items the page already has, as a whole number 0 or more.
 - Confirmation in standalone mode belongs to the page: the server relays `confirmed` and `fingerprint` exactly as the page sent them, and never adds either. It cannot tell what the browser displayed, so a caller holding the session cookie can confirm without any preview having been rendered. What protects the write is vmem's own check: it recomputes the preview from the current vault and writes only when the fingerprint still matches, so a stale or invented fingerprint is answered with the fresh preview instead of a write. Reaching the API at all takes the one-time sign-in link's cookie, a same-origin `Origin` and the loopback Host, which bounds who can call but does not prove that a person looked. `acon` does this differently (its server mints a confirm token) because the console renders the preview itself.
 - A provider failure is logged to the terminal and answered with the reason and the next step.
-- The page runs the existing client panels; assertions and history are not implemented yet.
+- The page runs every panel this bundle implements; a provider panel without a view stays out of the manifest instead of appearing as an empty tab.
 
 ## License
 

@@ -47,6 +47,9 @@ export function NoteView({ reply, params, navigate, beginWrite }: ViewProps) {
         >
           Delete…
         </button>
+        <button type="button" className="vmem-button" onClick={() => navigate("history", { path, ...vaultParam(params) })}>
+          History…
+        </button>
         <form
           className="vmem-inline"
           onSubmit={(event) => {
