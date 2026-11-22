@@ -8,6 +8,7 @@ import type { GraphPanelPage } from "@staix/vault-mem/ui-plugin";
 import { assembleGraphPages } from "../../src/graph/view/graph-snapshot.ts";
 import { buildGraphModel } from "../../src/graph/model.ts";
 import { createGraphViewStore } from "../../src/graph/view/state.ts";
+import { buildDecisionChains } from "../../src/graph/decisionChains.ts";
 import { implementedPanelManifest, graphAwareSnapshot } from "../../src/plugin/graph.ts";
 import type { GraphInput } from "../../src/graph/types.ts";
 import type { Host, SnapshotReply } from "../../src/client/host.ts";
@@ -33,6 +34,14 @@ beforeAll(async () => {
   for (const entry of entries) {
     const result = await writer.handlers.vmem_create!(entry) as { applied?: boolean; issues?: unknown };
     if (!result.applied) throw new Error(`Synthetic fixture refused: ${JSON.stringify(result.issues)}`);
+  }
+  for (const stem of ["z-sup-old", "a-sup-new", "z-by-old", "a-by-new", "z-both-old", "a-both-new"]) {
+    const result = await writer.handlers.vmem_create!({ stem, type: "decision", domain: "research", title: stem, description: "Synthetic decision", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" }) as { applied?: boolean; issues?: unknown };
+    if (!result.applied) throw new Error(`Synthetic decision refused: ${JSON.stringify(result.issues)}`);
+  }
+  for (const [stem, field, target] of [["a-sup-new", "supersedes", "z-sup-old"], ["z-by-old", "superseded_by", "a-by-new"], ["a-both-new", "supersedes", "z-both-old"], ["z-both-old", "superseded_by", "a-both-new"]]) {
+    const result = await writer.handlers.vmem_set_frontmatter!({ vault: "test", path: `notes/${stem}.md`, set: { [field!]: `[[${target}]]` } }) as { applied?: boolean; issues?: unknown };
+    if (!result.applied) throw new Error(`Synthetic relation refused: ${JSON.stringify(result.issues)}`);
   }
   process.env.VMEM_HOME = home;
   process.env.AMEM_HOME = join(root, "memory");
@@ -69,6 +78,27 @@ test("actual provider pages assemble and match its neighbors and path queries", 
   expect(store.getState().path).toEqual(["alpha", "beta"]);
   expect(implementedPanelManifest(providerPlugin.manifest).panels.find((panel) => panel.id === "graph")?.order).toBe(11);
   expect(await graphAwareSnapshot(async () => ({ error: "unknown panel graph" }))({ panel: "graph", after: 0 })).toMatchObject({ graph: null });
+});
+
+test("real provider supersedes fields produce equivalent ordered chains without duplicate edges", async () => {
+  const first = await snapshot({ panel: "graph", vault: "test" });
+  const nodeIds = (first.columns as { id: string[] }).id;
+  const edgePage = await snapshot({ panel: "graph", vault: "test", page: String(first.next) });
+  const columns = edgePage.columns as { source: number[]; target: number[]; relation: number[]; relations: string[]; field: (string | null)[] };
+  const providerEdges = columns.source.map((source, i) => ({ source: nodeIds[source], target: nodeIds[columns.target[i]!], relation: columns.relations[columns.relation[i]!], field: columns.field[i] }));
+  expect(providerEdges).toContainEqual({ source: "a-sup-new", target: "z-sup-old", relation: "supersedes", field: "supersedes" });
+  expect(providerEdges).toContainEqual({ source: "z-by-old", target: "a-by-new", relation: "supersedes", field: "superseded_by" });
+  expect(providerEdges.filter((edge) => edge.relation === "supersedes" && ["a-both-new", "z-both-old"].includes(edge.source!))).toHaveLength(2);
+  const assembled = await assembleGraphPages(snapshot, first, { vault: "test" });
+  const model = buildGraphModel(assembled.graph as GraphInput);
+  const chains = buildDecisionChains(model).chains.map((chain) => chain.nodes.map((node) => node.id));
+  for (const kind of ["sup", "by", "both"]) {
+    expect(chains).toContainEqual([`z-${kind}-old`, `a-${kind}-new`]);
+    const related = model.edges.filter((edge) => edge.relation === "supersedes" && edge.source === `a-${kind}-new` && edge.target === `z-${kind}-old`);
+    expect(related).toHaveLength(1);
+  }
+  const store = createGraphViewStore(model); store.setMode("chains");
+  expect(store.getState().derived.visibleModel.edges.filter((edge) => edge.relation === "supersedes")).toHaveLength(3);
 });
 
 test("a stale real provider page restarts once and reloads the new revision", async () => {
@@ -189,7 +219,7 @@ test("rejects inconsistent revisions, offsets, sizes, totals and repeated cursor
   expect((await run({ ...pages[1], next: "edge-page" })).error).toContain("cursor is invalid");
   expect((await run({ ...pages[1], count: 0, columns: { source: [], target: [], relation: [], relations: [], field: [], rel: [], confidence_tag: [], confidence: [] }, next: null })).error).toContain("incomplete");
   const oversized = { ...pages[0]!, totals: { ...pages[0]!.totals, nodes: 10001 } };
-  const sizeMessage = "Graphs larger than 10,000 notes or 100,000 links are not supported in this panel yet; use Search or the note list instead.";
+  const sizeMessage = "Graphs larger than 10,000 notes or 100,000 links are not supported in this panel yet; use Search instead.";
   expect((await assembleGraphPages(async () => ({}), oversized, {})).error).toBe(sizeMessage);
   expect((await assembleGraphPages(async () => ({}), { ...pages[0]!, totals: { ...pages[0]!.totals, edges: 100001 } }, {})).error).toBe(sizeMessage);
   for (const totals of [null, { ...pages[0]!.totals, nodes: -1 }, { ...pages[0]!.totals, nodes: 1.5 }]) {

@@ -37,7 +37,7 @@
     "release:tag": "bun scripts/release-tag.ts"
   },
   "dependencies": {
-    "@staix/vault-mem": "0.13.0",
+    "@staix/vault-mem": "0.13.1",
     "graphology": "0.26.0",
     "graphology-layout-forceatlas2": "0.10.1",
     "react": "^19.2.0",

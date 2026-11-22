@@ -27,7 +27,7 @@ export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleI
   }, [layout, visibleIds, search]);
   return <section className="vmem-card vmem-graph-panel" aria-label="Decision chains">
     <h2 className="vmem-card-title">Decision chains</h2>
-    {!hasSupersedes && <p>The provider's graph does not carry supersedes edges yet (STAIxBWLB/vault-mem#294). Chains will appear when the provider supplies them; nothing to do now.</p>}
+    {!hasSupersedes && <p>This graph has no supersedes edges. Chains appear when decisions reference each other with supersedes or superseded_by.</p>}
     {shown.chains.length === 0 && <p>No linked decision chains in the current graph.</p>}
     {shown.chains.length > CHAIN_LIST_LIMIT && <p>Showing {CHAIN_LIST_LIMIT} of {shown.chains.length} chains; search or filter to narrow.</p>}
     <ol>{shown.chains.slice(0, CHAIN_LIST_LIMIT).map((chain) => {

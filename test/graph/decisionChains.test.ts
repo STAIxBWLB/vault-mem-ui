@@ -27,6 +27,13 @@ function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
 }
 
 describe("buildDecisionChains", () => {
+  it("orders by relation direction even when dates disagree and reciprocal fields repeat an edge", () => {
+    const nodes = [decision("old", "2027-01-01"), decision("middle", null), decision("new", "2020-01-01")];
+    const reciprocal: GraphEdge = { source: "old", target: "middle", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" };
+    const layout = buildDecisionChains(model(nodes, [supersedes("middle", "old"), reciprocal, supersedes("new", "middle")]));
+    expect(layout.chains).toHaveLength(1);
+    expect(layout.chains[0]!.nodes.map((node) => node.id)).toEqual(["old", "middle", "new"]);
+  });
   it("orders a 3-note chain left→right by date in one lane", () => {
     const layout = buildDecisionChains(
       model(
@@ -63,7 +70,7 @@ describe("buildDecisionChains", () => {
         [decision("d1", "2026-01-01"), decision("d2", "2026-02-01"), insight],
         [
           { source: "d1", target: "not-a-decision", relation: "supersedes", fromFrontmatter: true, origin: "workspace" },
-          { source: "d2", target: "d1", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" },
+          { source: "d1", target: "d2", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" },
         ],
       ),
     );

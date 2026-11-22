@@ -5,8 +5,8 @@
  * install of the published bytes shows it. The release workflow runs this on the staged tarball before anything is
  * published, and running it locally names the tarball the same way.
  *
- * This is not a bundle-content check: every installed file is compared with this checkout's own copy, so an empty or
- * stale `dist/` is packed and installed identically and passes here. What the bundle holds is the business of the fresh
+ * This is not a bundle-content check: every installed file is compared with this checkout's own copy, so stale or
+ * incorrect `dist/` bytes can be packed and installed identically and pass here. What the bundle holds is the business of the fresh
  * build that `bun run check` runs before the pack, not of this script.
  */
 

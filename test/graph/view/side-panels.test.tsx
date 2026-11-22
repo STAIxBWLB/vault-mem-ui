@@ -18,7 +18,7 @@ test("chain and unlinked lists are capped with counts", () => {
 
 test("search narrows chains before the cap so an older match stays reachable", () => {
   const nodes = Array.from({ length: 120 }, (_, i) => ({ id: `n${String(i).padStart(3, "0")}`, label: i === 0 ? "Wanted" : `Node ${i}`, relPath: `notes/n${String(i).padStart(3, "0")}.md`, type: "decision" }));
-  const edges = Array.from({ length: 60 }, (_, i) => ({ source: nodes[i * 2]!.id, target: nodes[i * 2 + 1]!.id, relation: "supersedes", fromFrontmatter: true }));
+  const edges = Array.from({ length: 60 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("Wanted");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
@@ -28,7 +28,7 @@ test("search narrows chains before the cap so an older match stays reachable", (
 
 test("an exact search match outranks more than 50 substring-matching chains", () => {
   const nodes = Array.from({ length: 600 }, (_, i) => ({ id: `n${String(i).padStart(3, "0")}`, label: `Note ${i}`, relPath: `notes/n${i}.md`, type: "decision" }));
-  const edges = Array.from({ length: 300 }, (_, i) => ({ source: nodes[i * 2]!.id, target: nodes[i * 2 + 1]!.id, relation: "supersedes", fromFrontmatter: true }));
+  const edges = Array.from({ length: 300 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("Note 4");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes search={state.search} focus={() => {}} open={() => {}} />);
