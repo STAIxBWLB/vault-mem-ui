@@ -165,11 +165,15 @@ describe("GraphPanel", () => {
     await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
     const first = FakeWorker.last!; await act(async () => { first.emit({ type: "ready" } as FromWorker); }); await flush();
     expect(calls).toHaveLength(0);
-    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click(); }); await flush();
+    const toggle = [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!;
+    await act(async () => { toggle.focus(); toggle.click(); }); await flush();
     const worker = FakeWorker.last!;
     expect(worker).not.toBe(first);
     expect(first.terminated).toBe(true);
     expect(fake.killed).toBe(false);
+    expect(toggle.isConnected).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
     const init = worker.sent.find((message) => message.type === "init")!;
     if (init.type !== "init") throw new Error("missing worker init");
     expect([...init.graph.sources]).toEqual([0, 1, 0]);

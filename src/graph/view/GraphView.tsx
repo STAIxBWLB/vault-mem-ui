@@ -178,7 +178,6 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
 
   useEffect(() => {
     if (!canvasReady || !canvasRef.current) return;
-    setLayoutAvailable(false);
     let cancelled = false;
     let lastSave = 0;
     let latest: Float32Array | null = null;
