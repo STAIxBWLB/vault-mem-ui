@@ -181,7 +181,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
     }
   };
 
-  const selected = state.selectedId ? model.nodes.find((n) => n.id === state.selectedId) ?? null : null;
+  const selected = state.selectedId ? state.derived.visibleModel.nodes.find((n) => n.id === state.selectedId) ?? null : null;
   const running = state.layout.kind === "running";
   const paused = state.layout.kind === "paused";
 

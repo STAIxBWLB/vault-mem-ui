@@ -25,7 +25,7 @@ The `acon` plugin in `src/plugin` keeps `@staix/vault-mem/ui-plugin`'s provider 
 
 ## Graph controls
 
-The graph view provides search, domain, type, relation and community filters, a legend, a selected-note inspector and read-only insights. Possible-link analysis is limited to graphs with at most 30,000 edges; narrow larger graphs with filters. The provider graph snapshot is still pending (vault-mem #266).
+The graph view provides search, domain, type, relation and community filters, a legend, a selected-note inspector and read-only insights. Level of detail uses the full graph edge count even when filters are active. Possible-link analysis is limited to graphs with at most 30,000 edges; narrow larger graphs with filters. The provider graph snapshot is still pending (vault-mem #266).
 
 ## Scope
 

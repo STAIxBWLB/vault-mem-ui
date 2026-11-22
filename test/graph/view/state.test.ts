@@ -67,6 +67,35 @@ describe("graph view store", () => {
     expect(store.getState()).toMatchObject({ selectedId: "b", focusId: "b" });
   });
 
+  test("search clears hidden selection, hover, focus and path, and retains the analysis model", () => {
+    const store = createGraphViewStore(model);
+    store.select("b");
+    store.hover("b");
+    store.pathTo("a");
+    store.pathTo("c");
+    const analysis = store.getState().derived.analysisModel;
+    store.setSearch("notes/d");
+    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: null, path: null });
+    expect(store.getState().derived.analysisModel).toBe(analysis);
+    store.select("b");
+    expect(store.getState().selectedId).toBeNull();
+  });
+
+  test("filtered paths use visible edges and profile changes clear hidden state", () => {
+    const store = createGraphViewStore(model);
+    store.select("b");
+    store.hover("b");
+    store.setProfile({ ...store.getState().profile, relations: ["related"] });
+    store.pathTo("a");
+    store.pathTo("c");
+    expect(store.getState()).toMatchObject({ path: null, pathMissing: true });
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    store.select("e");
+    store.hover("e");
+    store.setProfile({ ...store.getState().profile, showUnresolved: false });
+    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: null });
+  });
+
   test("local view narrows to the neighbourhood and goes back to global", () => {
     const store = createGraphViewStore(model);
     store.openLocal("a", 1);
