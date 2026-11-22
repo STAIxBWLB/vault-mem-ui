@@ -4,13 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVaultMcp } from "@staix/vault-mem";
 import { plugin as providerPlugin } from "@staix/vault-mem/ui-plugin";
-import { assembleGraphSnapshot } from "../../node_modules/@staix/vault-mem/src/ui/graph-snapshot.ts";
+import type { GraphPanelPage } from "@staix/vault-mem/ui-plugin";
 import { assembleGraphPages } from "../../src/graph/view/graph-snapshot.ts";
 import { buildGraphModel } from "../../src/graph/model.ts";
 import { createGraphViewStore } from "../../src/graph/view/state.ts";
 import { implementedPanelManifest, graphAwareSnapshot } from "../../src/plugin/graph.ts";
 import type { GraphInput } from "../../src/graph/types.ts";
-import type { Host } from "../../src/client/host.ts";
+import type { Host, SnapshotReply } from "../../src/client/host.ts";
 import { createFakeHost } from "../../src/client/fake.ts";
 import { createStore } from "../../src/client/store.ts";
 
@@ -27,7 +27,7 @@ beforeAll(async () => {
   const entries = [
     { stem: "index", type: "moc", domain: "research", title: "Index", description: "Synthetic map" },
     { stem: "beta", type: "insight", domain: "research", title: "Beta", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
-    { stem: "alpha", type: "insight", domain: "research", title: "Alpha", description: "Synthetic note", topics: ["index"], body: "[[beta]]\n\n## Topics\n\n- [[index]]" },
+    { stem: "alpha", type: "insight", domain: "research", title: "Alpha", description: "Synthetic note", topics: ["index"], body: "- [[beta]] (supports)\n\n## Topics\n\n- [[index]]" },
     { stem: "unused", type: "insight", domain: "research", title: "Unused", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
   ];
   for (const entry of entries) {
@@ -48,7 +48,15 @@ test("actual provider pages assemble and match its neighbors and path queries", 
   const assembled = await assembleGraphPages(snapshot, first, { vault: "test" });
   const graph = assembled.graph as GraphInput;
   expect(graph.nodes.map((node) => node.id)).toEqual(expect.arrayContaining(["alpha", "beta", "index"]));
-  expect(graph.edges).toContainEqual({ source: "alpha", target: "beta", relation: "wiki_link", fromFrontmatter: false });
+  const nodeColumns = first.columns as { id: string[]; community: (number | null)[] };
+  const edgePage = await snapshot({ panel: "graph", vault: "test", page: String(first.next) });
+  const edgeColumns = edgePage.columns as { source: number[]; target: number[]; rel: (string | null)[] };
+  const edgeIndex = edgeColumns.source.findIndex((source, i) => nodeColumns.id[source] === "alpha" && nodeColumns.id[edgeColumns.target[i]!] === "beta");
+  expect(edgeColumns.rel[edgeIndex]).toBe("supports");
+  expect(graph.edges).toContainEqual({ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: false });
+  const alphaIndex = nodeColumns.id.indexOf("alpha");
+  expect(nodeColumns.community[alphaIndex]).not.toBeNull();
+  expect(graph.communities?.alpha).toBe(nodeColumns.community[alphaIndex] ?? undefined);
   expect(assembled.graphStats).toMatchObject({ pages: 2 });
   const neighbors = await snapshot({ panel: "graph", vault: "test", neighbors: "alpha" });
   expect((neighbors.neighborhood as { nodes: { id: string }[] }).nodes.map((node) => node.id)).toContain("beta");
@@ -75,10 +83,19 @@ test("a stale real provider page restarts once and reloads the new revision", as
   expect((assembled.graph as GraphInput).nodes.some((node) => node.id === "unused")).toBe(false);
 });
 
+function fakePages(name = "missing"): (GraphPanelPage & Record<string, unknown>)[] {
+  const totals = { nodes: 2, edges: 1, placeholders: 1, placeholdersOmitted: 0 };
+  const graph = { directed: false, multigraph: false, partitioner: "leiden", resolution: 1, modularity: 0, iterations: 1, max_iterations: 32 };
+  return [
+    { schema: 1, vault: "test", revision: name, graph, totals, kind: "nodes", offset: 0, count: 2, columns: { id: ["a", name], label: ["A", name], type: ["insight", null], domain: ["research", null], source_file: ["notes/a.md", null], community: [2, null], degree: [1, 1], updated: [null, null], date: [null, null], placeholder: [false, true], description: [null, null], confidence: [null, null], topics: [null, null] }, next: "edge-page", cursor: 1 },
+    { schema: 1, vault: "test", revision: name, graph, totals, kind: "edges", offset: 0, count: 1, columns: { source: [0], target: [1], relations: ["wiki_link"], relation: [0], field: [null], rel: [null], confidence_tag: "EXTRACTED", confidence: 1 }, next: null, cursor: 2 },
+  ];
+}
+
 test("provider columnar unresolved placeholders stay non-navigable", async () => {
-  const assembly = assembleGraphSnapshot({ notes: [{ path: "notes/a.md", source: "---\ntype: insight\ndomain: research\n---\n[[missing]]" }], today: "2026-01-01", logPath: "log", log: null, registryIds: null, reports: {} }, "test");
+  const pages = fakePages();
   let i = 0;
-  const result = await assembleGraphPages(async () => ({ ...assembly.pages[++i]!, cursor: i }), { ...assembly.pages[0]!, cursor: 0 }, {});
+  const result = await assembleGraphPages(async () => ({ ...pages[++i]!, cursor: i }), { ...pages[0]!, cursor: 0 }, {});
   expect((result.graph as GraphInput).nodes.find((node) => node.id === "missing")).toMatchObject({ relPath: null });
   expect((result.graph as GraphInput).edges).toContainEqual({ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false });
 });
@@ -86,8 +103,8 @@ test("provider columnar unresolved placeholders stay non-navigable", async () =>
 test("errors stay verbatim and a second stale page does not retry forever", async () => {
   const error = { error: "graph: no selected vault; select a registered vault" };
   expect(await assembleGraphPages(async () => ({}), error, {})).toEqual(error);
-  const assembly = assembleGraphSnapshot({ notes: [{ path: "notes/a.md", source: "---\ntype: insight\n---\n[[missing]]" }], today: "2026-01-01", logPath: "log", log: null, registryIds: null, reports: {} }, "test");
-  const first = { ...assembly.pages[0]!, cursor: 1 };
+  const pages = fakePages();
+  const first = { ...pages[0]!, cursor: 1 };
   let calls = 0;
   const failure = "graph page is invalid or expired; restart from the first page";
   const result = await assembleGraphPages(async (input) => { calls++; return input.page ? { error: failure } : first; }, first, {});
@@ -96,11 +113,11 @@ test("errors stay verbatim and a second stale page does not retry forever", asyn
 });
 
 test("the client store assembles pushed pages without retaining partial results", async () => {
-  const assembly = assembleGraphSnapshot({ notes: [{ path: "notes/a.md", source: "---\ntype: insight\n---\n[[missing]]" }], today: "2026-01-01", logPath: "log", log: null, registryIds: null, reports: {} }, "test");
-  const host = createFakeHost({ snapshots: { graph: () => ({ ...assembly.pages[1]!, cursor: 2 }) } });
+  const pages = fakePages();
+  const host = createFakeHost({ snapshots: { graph: () => ({ ...pages[1]!, cursor: 2 }) } });
   const store = createStore(host, { initialPanel: "graph" });
   const stop = store.start();
-  host.push({ ...assembly.pages[0]!, cursor: 1 });
+  host.push({ ...pages[0]!, cursor: 1 });
   await Bun.sleep(0);
   expect((store.getState().reply?.graph as GraphInput).edges).toHaveLength(1);
   host.push({ changed: false, cursor: 1 });
@@ -110,14 +127,14 @@ test("the client store assembles pushed pages without retaining partial results"
 });
 
 test("unchanged polling and pushes reuse the graph; a new revision loads all pages", async () => {
-  const synthetic = (name: string) => assembleGraphSnapshot({ notes: [{ path: "notes/a.md", source: `---\ntype: insight\n---\n[[${name}]]` }], today: "2026-01-01", logPath: "log", log: null, registryIds: null, reports: {} }, "test");
-  const old = synthetic("missing"), updated = synthetic("other");
-  let current = old, cursor = 101;
+  const old = fakePages("missing"), updated = fakePages("other");
+  let current = old, cursor = 101, failNext = false;
   const host = createFakeHost();
   host.snapshot = async (input) => {
     host.calls.snapshot.push(input);
+    if (failNext) { failNext = false; throw new Error("offline"); }
     if (!input.page && input.after === cursor) return { changed: false, cursor };
-    const page = input.page ? current.pages.find((candidate) => candidate.kind === "edges")! : current.pages[0]!;
+    const page = input.page ? current.find((candidate) => candidate.kind === "edges")! : current[0]!;
     return { ...page, cursor: input.page ? cursor + 1 : cursor };
   };
   const store = createStore(host, { initialPanel: "graph" });
@@ -128,14 +145,81 @@ test("unchanged polling and pushes reuse the graph; a new revision loads all pag
   expect(host.calls.snapshot).toHaveLength(3);
   expect(host.calls.snapshot[2]).toMatchObject({ panel: "graph", after: 101 });
   expect(store.getState().reply?.graph).toBe(held);
-  const stop = store.start();
-  host.push({ ...old.pages[0]!, cursor: 101 });
-  await Bun.sleep(0);
-  expect(host.calls.snapshot).toHaveLength(3);
+  cursor = 151;
+  await store.refresh();
+  expect(host.calls.snapshot).toHaveLength(4);
   expect(store.getState().reply?.graph).toBe(held);
+  expect((store.getState().reply?.graphStats as { cursor: number }).cursor).toBe(151);
+  await store.refresh();
+  expect(host.calls.snapshot.at(-1)).toMatchObject({ after: 151 });
+  const stop = store.start();
+  const callsBeforePush = host.calls.snapshot.length;
+  host.push({ ...old[0]!, cursor: 171 });
+  await Bun.sleep(0);
+  expect(host.calls.snapshot).toHaveLength(callsBeforePush);
+  expect(store.getState().reply?.graph).toBe(held);
+  expect((store.getState().reply?.graphStats as { cursor: number }).cursor).toBe(171);
   current = updated; cursor = 201;
   await store.refresh();
-  expect(host.calls.snapshot).toHaveLength(5);
+  expect(host.calls.snapshot).toHaveLength(callsBeforePush + 2);
   expect((store.getState().reply?.graph as GraphInput).nodes.map((node) => node.id)).toContain("other");
+  const newGraph = store.getState().reply?.graph;
+  failNext = true; await store.refresh();
+  expect(store.getState().phase).toBe("error");
+  await store.refresh();
+  expect(store.getState().phase).toBe("ready");
+  expect(store.getState().error).toBeUndefined();
+  expect(store.getState().reply?.graph).toBe(newGraph);
+  stop();
+});
+
+test("rejects inconsistent revisions, offsets, sizes, totals and repeated cursors", async () => {
+  const pages = fakePages();
+  const run = async (next: Record<string, unknown>, first = pages[0]!) => assembleGraphPages(async (input) => input.page ? next : first, first, {});
+  expect((await run({ ...pages[1], revision: "changed" })).error).toContain("changed or are invalid");
+  expect((await run({ ...pages[0], offset: 1 })).error).toContain("out of order");
+  expect((await run({ ...pages[1], next: "edge-page" })).error).toContain("cursor is invalid");
+  expect((await run({ ...pages[1], count: 0, columns: { source: [], target: [], relation: [], relations: [], field: [], rel: [], confidence_tag: [], confidence: [] }, next: null })).error).toContain("incomplete");
+  const oversized = { ...pages[0]!, totals: { ...pages[0]!.totals, nodes: 10001 } };
+  expect((await assembleGraphPages(async () => ({}), oversized, {})).error).toContain("10,000 notes, 100,000 links");
+  expect((await assembleGraphPages(async () => ({}), { ...pages[0], totals: null }, {})).error).toContain("malformed totals");
+});
+
+test("cancellation stops page assembly before processing a delayed page", async () => {
+  const pages = fakePages(); let active = true; let release!: (page: SnapshotReply) => void;
+  const pending = assembleGraphPages(() => new Promise((resolve) => { release = resolve; }), pages[0]!, {}, () => active);
+  active = false; release(pages[1]!);
+  expect(await pending).toEqual({ cancelled: true });
+});
+
+test("a newer refresh wins over a push whose page is still in flight", async () => {
+  const old = fakePages("old"), fresh = fakePages("fresh");
+  const host = createFakeHost(); let release!: (page: SnapshotReply) => void;
+  host.snapshot = async (input) => {
+    if (input.page && input.vault === "test" && !release) return new Promise((resolve) => { release = resolve; });
+    return input.page ? fresh[1]! : { ...fresh[0]!, cursor: 10 };
+  };
+  const store = createStore(host, { initialPanel: "graph" }); const stop = store.start();
+  host.push(old[0]!);
+  expect(release).toBeDefined();
+  await store.refresh();
+  expect((store.getState().reply?.graph as GraphInput).nodes.map((node) => node.id)).toContain("fresh");
+  release(old[1]!);
+  await Bun.sleep(0);
+  expect((store.getState().reply?.graph as GraphInput).nodes.map((node) => node.id)).toContain("fresh");
+  stop();
+});
+
+test("a new push supersedes an older refresh in flight", async () => {
+  const old = fakePages("old"), fresh = fakePages("fresh");
+  const host = createFakeHost(); let release!: (page: SnapshotReply) => void;
+  host.snapshot = async (input) => input.page ? fresh[1]! : new Promise((resolve) => { release = resolve; });
+  const store = createStore(host, { initialPanel: "graph" }); const stop = store.start();
+  const refresh = store.refresh();
+  host.push(fresh[0]!);
+  await Bun.sleep(0);
+  release(old[0]!);
+  await refresh;
+  expect((store.getState().reply?.graph as GraphInput).nodes.map((node) => node.id)).toContain("fresh");
   stop();
 });
