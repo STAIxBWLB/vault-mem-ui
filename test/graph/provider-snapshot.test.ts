@@ -108,3 +108,34 @@ test("the client store assembles pushed pages without retaining partial results"
   expect((store.getState().reply?.graph as GraphInput).nodes).toHaveLength(2);
   stop();
 });
+
+test("unchanged polling and pushes reuse the graph; a new revision loads all pages", async () => {
+  const synthetic = (name: string) => assembleGraphSnapshot({ notes: [{ path: "notes/a.md", source: `---\ntype: insight\n---\n[[${name}]]` }], today: "2026-01-01", logPath: "log", log: null, registryIds: null, reports: {} }, "test");
+  const old = synthetic("missing"), updated = synthetic("other");
+  let current = old, cursor = 101;
+  const host = createFakeHost();
+  host.snapshot = async (input) => {
+    host.calls.snapshot.push(input);
+    if (!input.page && input.after === cursor) return { changed: false, cursor };
+    const page = input.page ? current.pages.find((candidate) => candidate.kind === "edges")! : current.pages[0]!;
+    return { ...page, cursor: input.page ? cursor + 1 : cursor };
+  };
+  const store = createStore(host, { initialPanel: "graph" });
+  await store.refresh();
+  expect(host.calls.snapshot).toHaveLength(2);
+  const held = store.getState().reply?.graph;
+  await store.refresh();
+  expect(host.calls.snapshot).toHaveLength(3);
+  expect(host.calls.snapshot[2]).toMatchObject({ panel: "graph", after: 101 });
+  expect(store.getState().reply?.graph).toBe(held);
+  const stop = store.start();
+  host.push({ ...old.pages[0]!, cursor: 101 });
+  await Bun.sleep(0);
+  expect(host.calls.snapshot).toHaveLength(3);
+  expect(store.getState().reply?.graph).toBe(held);
+  current = updated; cursor = 201;
+  await store.refresh();
+  expect(host.calls.snapshot).toHaveLength(5);
+  expect((store.getState().reply?.graph as GraphInput).nodes.map((node) => node.id)).toContain("other");
+  stop();
+});

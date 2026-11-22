@@ -78,7 +78,7 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
   if (content !== seen.content) setSeen({ content, generation: seen.generation + 1 });
   const generation = content !== seen.content ? seen.generation + 1 : seen.generation;
   const model = useMemo(() => (parsed ? buildGraphModel(parsed) : null), [generation]); // keyed on content, not identity
-  if (typeof reply.error === "string") return <><Notice tone="err">{reply.error}</Notice><button type="button" className="vmem-button" onClick={() => navigate("graph", vaultParam(params))}>First page</button></>;
+  if (typeof reply.error === "string") return <><Notice tone="err">{reply.error}</Notice>{/restart from the first page/i.test(reply.error) && <button type="button" className="vmem-button" onClick={() => navigate("graph", vaultParam(params))}>First page</button>}</>;
   if (!model) {
     const reason = typeof reply.unavailable === "string" ? reply.unavailable : "this vmem provider does not send a graph snapshot yet (vault-mem #266); update @staix/vault-mem, then reload this panel";
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;

@@ -67,6 +67,8 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
   let hostWritePending = false;
   const acceptSnapshot = async (reply: SnapshotReply, seq: number, panel: string, params: Record<string, string>) => {
     if (seq !== asked) return;
+    const stats = state.reply?.graphStats as { cursor?: unknown; vault?: unknown; revision?: unknown } | undefined;
+    if (panel === "graph" && state.reply?.graph && reply.schema === 1 && typeof reply.cursor === "number" && reply.cursor === stats?.cursor && reply.vault === stats.vault && reply.revision === stats.revision) return;
     const assembled = panel === "graph" ? await assembleGraphPages((input) => host.snapshot(input), reply, params, () => seq === asked) : reply;
     if (seq !== asked) return;
     if (assembled.changed === false && state.reply) return;
@@ -102,7 +104,8 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
       // Every request gets a number, and only the newest one may land: a slow reply must not overwrite the panel
       // the person already moved to, nor the same panel asked with different parameters.
       const seq = ++asked;
-      const input = { panel: state.panel, ...state.params };
+      const stats = state.reply?.graphStats as { cursor?: unknown } | undefined;
+      const input = { panel: state.panel, ...state.params, ...(state.panel === "graph" && state.reply?.graph && typeof stats?.cursor === "number" ? { after: stats.cursor } : {}) };
       try {
         const reply = await host.snapshot(input);
         await acceptSnapshot(reply, seq, input.panel, state.params);

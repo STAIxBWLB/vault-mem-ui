@@ -62,5 +62,5 @@ async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params
     page = next as unknown as GraphSnapshotPage;
   }
   if (nodes.length !== start.totals.nodes || edges.length !== start.totals.edges) return { error: "Graph pages are incomplete; restart from the first page." };
-  return { graph: { nodes, edges, ...(Object.keys(communities).length ? { communities } : {}) }, graphStats: { pages, bytes, revision: start.revision, placeholdersOmitted: start.totals.placeholdersOmitted } };
+  return { graph: { nodes, edges, ...(Object.keys(communities).length ? { communities } : {}) }, graphStats: { pages, bytes, revision: start.revision, cursor: start.cursor, vault: start.vault, placeholdersOmitted: start.totals.placeholdersOmitted } };
 }
