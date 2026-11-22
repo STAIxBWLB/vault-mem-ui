@@ -227,34 +227,51 @@ test("history: a half-picked pair survives paging, so revisions on two pages can
 
 test("history: a shown pair and a link-carried end both survive a revisions page turn", () => {
   const navigations: unknown[] = [];
-  // The pair is on screen after Show changes, so it lives in from/to and in nothing else of the view's own.
+  // The changes list is on screen, so the pair that produced it travels with the cursor: only the revisions move.
+  const changes = {
+    from: older.revision, to: newer.revision,
+    changed: [{ path: "notes/a.md", status: "M", before: "1111aaaa2222", after: "3333bbbb4444" }],
+    total: 1, truncated: false, skippedDenied: 0, skippedSymlink: 0,
+  };
   mount(
     <HistoryView
-      reply={{ ...historyReply, changes: { from: older.revision, to: newer.revision, changed: [], total: 0, truncated: false, skippedDenied: 0, skippedSymlink: 0 } }}
+      reply={{ ...historyReply, changes }}
       params={{ path: "notes/a.md", from: older.revision, to: newer.revision }}
       navigate={navigate(navigations)}
       beginWrite={() => {}}
     />,
   );
+  expect(rows("Changed notes")).toHaveLength(1);
   click(button("Older revisions")!);
   expect(navigations.at(-1)).toEqual({
     panel: "history",
-    params: { vault: "work", path: "notes/a.md", cursor: "h2", pickFrom: older.revision, pickTo: newer.revision },
+    params: {
+      vault: "work", path: "notes/a.md", cursor: "h2",
+      from: older.revision, to: newer.revision, pickFrom: older.revision, pickTo: newer.revision,
+    },
   });
 
-  // The next page is a fresh mount, and both ends are still chosen there: the pair is one click from being compared.
+  // The next page is a fresh mount at those params: both ends are still chosen and the changed list is still shown.
   act(() => root.unmount());
   container.remove();
   mount(
     <HistoryView
-      reply={{ ...historyReply, history: { ...history, revisions: [third], continuation: undefined } }}
-      params={{ path: "notes/a.md", cursor: "h2", pickFrom: older.revision, pickTo: newer.revision }}
+      reply={{ ...historyReply, history: { ...history, revisions: [third], continuation: undefined }, changes }}
+      params={{ path: "notes/a.md", cursor: "h2", pickFrom: older.revision, pickTo: newer.revision, from: older.revision, to: newer.revision }}
       navigate={navigate(navigations)}
       beginWrite={() => {}}
     />,
   );
   expect(container.textContent).toContain("From aaaaaaaaaaaa to cccccccccccc");
   expect(button("Show changes")!.hasAttribute("disabled")).toBe(false);
+  expect(rows("Changed notes").map((r) => r.textContent)).toEqual(["notes/a.mdmodified · before 1111aaaa2222 · after 3333bbbb4444M"]);
+
+  // Coming back for the newest revisions keeps that list too.
+  click(button("Newest revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision, pickFrom: older.revision, pickTo: newer.revision },
+  });
 
   // A link that carries one end in from= keeps it too, rather than losing it to a cursor-only page turn.
   act(() => root.unmount());

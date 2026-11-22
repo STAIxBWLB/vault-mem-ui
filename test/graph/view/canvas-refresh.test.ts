@@ -56,10 +56,17 @@ function harness(input: GraphInput) {
     hasProgramIndices: () => nodeIndex.size === graph.order && edgeIndex.size === graph.size,
     kill: () => undefined,
   };
-  // Sigma's constructor binds these two to the graph, and they are why a theme pass needs no refresh of its own: each
-  // bulk attribute update repaints through skipIndexation. Bound here too, so a pass over an emptied index fails with
-  // Sigma's own message instead of passing quietly.
-  graph.on("eachNodeAttributesUpdated", () => { sigma.refresh({ partialGraph: { nodes: graph.nodes() }, skipIndexation: true, schedule: true }); });
+  // Sigma's constructor binds these two to the graph, and they are why a theme pass needs no refresh of its own: a bulk
+  // attribute update repaints through skipIndexation, except a node batch that moved x, y, zIndex or type, which sigma
+  // re-indexes instead (3.0.3 bindGraphHandlers: LAYOUT_IMPACTING_FIELDS). Bound here too, so a pass over an emptied
+  // index fails with Sigma's own message instead of passing quietly. graphology reports the changed attributes as
+  // strings or numbers, and sigma decides the branch by set membership, so the set is typed the same way.
+  const LAYOUT_FIELDS = new Set<string | number>(["x", "y", "zIndex", "type"]);
+  graph.on("eachNodeAttributesUpdated", (event: { hints?: { attributes?: (string | number)[] } }) => {
+    const fields = event.hints?.attributes;
+    const layoutChanged = !fields || fields.some((field) => LAYOUT_FIELDS.has(field));
+    sigma.refresh({ partialGraph: { nodes: graph.nodes() }, skipIndexation: !layoutChanged, schedule: true });
+  });
   graph.on("eachEdgeAttributesUpdated", () => { sigma.refresh({ partialGraph: { edges: graph.edges() }, skipIndexation: true, schedule: true }); });
   const deps: CanvasDeps = {
     createGraph: () => graph as unknown as GraphLike,
@@ -71,7 +78,9 @@ function harness(input: GraphInput) {
   const step = (fn: () => void) => { fn(); canvas.update(store.getState()); };
   const full = () => refreshes.filter((o) => !o?.partialGraph).length;
   const light = () => refreshes.filter((o) => o?.partialGraph && o.skipIndexation).length;
-  return { store, canvas, step, refreshes, full, light, graph, events, model, settings, sigma };
+  // A partial repaint that re-indexes instead of skipping: what sigma does for a batch that moved a layout field.
+  const reindex = () => refreshes.filter((o) => o?.partialGraph && !o.skipIndexation).length;
+  return { store, canvas, step, refreshes, full, light, reindex, graph, events, model, settings, sigma };
 }
 
 const ring = (n: number, chords = 0): GraphInput => ({
@@ -143,15 +152,18 @@ test("a layout batch is one graph-wide update, never one event per coordinate, a
   const h = harness(ring(200));
   const positions = new Float32Array(400).map((_, i) => i);
   h.canvas.applyPositions(positions);
-  // One graph-wide update: Sigma's own listener then repaints it once, and the canvas asks for nothing.
+  // One graph-wide update: Sigma's own listener then re-indexes it once (x and y are layout fields) and the canvas asks
+  // for nothing.
   expect(h.events).toEqual(["each"]);
   expect(h.full()).toBe(0);
-  expect(h.light()).toBe(1);
+  expect(h.light()).toBe(0);
+  expect(h.reindex()).toBe(1);
   expect(h.graph.getNodeAttributes("n7")).toMatchObject({ x: 14, y: 15 });
   // The status line's iteration count changes on every batch; that must not refresh Sigma either.
   for (let i = 1; i <= 5; i += 1) h.step(() => h.store.setLayout({ kind: "running", iterations: i }));
   expect(h.full()).toBe(0);
-  expect(h.light()).toBe(1);
+  expect(h.light()).toBe(0);
+  expect(h.reindex()).toBe(1);
   expect(h.events).toEqual(["each"]);
 });
 

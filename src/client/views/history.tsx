@@ -48,6 +48,10 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   const shownFrom = str(changes.from);
   const shownTo = str(changes.to);
   const changesNav = (extra: Record<string, string>) => nav({ from: shownFrom, to: shownTo, ...pickParams(), ...extra });
+  // A revisions page turn keeps the changes list on screen too: the pair that produced it travels with the cursor, so
+  // only the revisions under it change.
+  const revisionsNav = (extra: Record<string, string>) =>
+    nav({ ...pickParams(), ...(shownFrom && shownTo ? { from: shownFrom, to: shownTo } : {}), ...extra });
   const historyMore = str(history.continuation);
   const changesMore = str(changes.continuation);
   const stop = str(history.stopReason);
@@ -92,12 +96,12 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
         />
         <div className="vmem-bar">
           {params.cursor ? (
-            <button type="button" className="vmem-button" onClick={() => nav({ ...pickParams() })}>
+            <button type="button" className="vmem-button" onClick={() => revisionsNav({})}>
               Newest revisions
             </button>
           ) : null}
           {historyMore ? (
-            <button type="button" className="vmem-button" onClick={() => nav({ cursor: historyMore, ...pickParams() })}>
+            <button type="button" className="vmem-button" onClick={() => revisionsNav({ cursor: historyMore })}>
               Older revisions
             </button>
           ) : null}
