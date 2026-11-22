@@ -12,7 +12,7 @@ For development, install Bun 1.4.2 or newer, run `bun install`, then `bun run ch
 
 ## Client
 
-`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint and log. It is written against one small host interface and runs in both hosts from the same bundle.
+`src/client` is the browser client for vmem's existing panels: overview, search, note, promote, lint, log and settings. It is written against one small host interface and runs in both hosts from the same bundle. Settings edits write permission, graph resolution and enrichment for the selected vault, and the default vault and PII patterns for all vaults. Every change is previewed and confirmed; default vault and permission changes require restarting the console and MCP server.
 
 - Host interface (`src/client/host.ts`): `snapshot`, `action`, `theme` and `mount`. `acon`'s `ConsoleHost` is adapted by `createAconHost`; the standalone adapter uses the same-origin HTTP endpoints, and `createFakeHost` is available for tests.
 - Writes go through `action` only. In `acon` the console owns the confirmation: its server mints the confirm token, shows the preview in its own dialog and refuses a page that sets `confirmed` or `fingerprint`, so the panel sends the bare action and reports the outcome — the adapter says `confirm: "host"` and drops those two keys instead of forwarding them. A host that answers the provider directly instead (the fake host today, the standalone adapter) gets the two-step flow from the client: the preview with its fingerprint and the planned changes, nothing sent until the person confirms, and the confirm re-sending that same fingerprint, so the client cannot confirm a preview it did not show.

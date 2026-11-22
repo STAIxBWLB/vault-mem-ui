@@ -23,6 +23,11 @@ test("settings submits only edited values for the displayed vault", () => {
   let submitted: ActionInput | undefined;
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   act(() => root.render(<SettingsView reply={{ vault: "work", defaultVault: "work", defaultVaultExplicit: false, write: "mcp", piiPatterns: ["private"], graphResolution: 1, enrichmentEnabled: false }} params={{}} navigate={() => {}} beginWrite={(input) => { submitted = input; }} />));
+  expect(container.textContent).toContain("This vault (work)");
+  expect(container.textContent).toContain("All vaults");
+  act(() => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(submitted).toBeUndefined();
+  expect(container.textContent).toContain("No values changed. Edit a setting, then preview again.");
   const write = container.querySelector<HTMLSelectElement>('#settings-write')!;
   write.value = "none";
   act(() => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
@@ -40,6 +45,6 @@ test("settings preview, stale confirmation and refusal preserve the provider res
   expect(stale).toMatchObject({ phase: "preview", fingerprint: "two", preview: ["new preview"] });
   host.action = async () => ({ ok: true, message: "Settings updated; restart the console and MCP server" });
   expect(await confirmWrite(host, stale)).toMatchObject({ phase: "done", message: expect.stringContaining("restart") });
-  host.action = async () => ({ ok: false, error: "settings: no values changed; change a setting before previewing" });
-  expect(await startWrite(host, { action: "settings", vault: "work", changes: {} })).toMatchObject({ phase: "error", message: expect.stringContaining("settings: no values changed; change a setting before previewing") });
+  host.action = async () => ({ ok: false, error: "settings: invalid change; correct the settings and preview again" });
+  expect(await startWrite(host, input)).toMatchObject({ phase: "error", message: expect.stringContaining("settings: invalid change; correct the settings and preview again") });
 });
