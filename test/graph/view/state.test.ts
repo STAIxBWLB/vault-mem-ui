@@ -127,7 +127,7 @@ describe("graph view store", () => {
     expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
   });
 
-  test("a visible path source and path survive changes, but hidden edges clear them", () => {
+  test("a visible path source survives changes, and a disconnected path is reported", () => {
     const store = createGraphViewStore(model);
     store.pathTo("a");
     store.setSearch("notes/c");
@@ -141,7 +141,26 @@ describe("graph view store", () => {
     store.setSearch("");
     expect(store.getState().path).toEqual(["b", "c"]);
     store.setProfile({ ...store.getState().profile, relations: ["wiki_link"] });
-    expect(store.getState()).toMatchObject({ pathSourceId: null, path: null });
+    expect(store.getState()).toMatchObject({ pathSourceId: "b", pathTargetId: "c", path: null, pathMissing: true });
+  });
+
+  test("path and no-path notice are recomputed when visible edges change", () => {
+    const route = buildGraphModel({
+      nodes: ["a", "b", "c", "d"].map((id) => ({ id, label: id, relPath: `notes/${id}.md` })),
+      edges: [["a", "b", "wiki_link"], ["b", "c", "wiki_link"], ["c", "d", "wiki_link"], ["a", "d", "related"]].map(([source, target, relation]) => ({ source: source!, target: target!, relation: relation!, fromFrontmatter: false })),
+    }, 0);
+    const store = createGraphViewStore(route);
+    store.setProfile({ ...store.getState().profile, relations: ["related"] });
+    store.pathTo("a"); store.pathTo("c");
+    expect(store.getState()).toMatchObject({ pathMissing: true, pathTargetId: "c" });
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    expect(store.getState()).toMatchObject({ pathMissing: false, path: ["a", "b", "c"] });
+    store.pathTo("a");
+    store.setProfile({ ...store.getState().profile, relations: ["wiki_link"] });
+    store.pathTo("d");
+    expect(store.getState().path).toEqual(["a", "b", "c", "d"]);
+    store.setProfile({ ...store.getState().profile, relations: [] });
+    expect(store.getState().path).toEqual(["a", "d"]);
   });
 
   test("shortest path picks a source, then finds the path or reports none", () => {

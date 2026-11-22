@@ -31,6 +31,7 @@ export interface GraphViewState {
   hoverId: string | null;
   /** First endpoint chosen for a shortest path, then the found path (inclusive) or null when none exists. */
   pathSourceId: string | null;
+  pathTargetId: string | null;
   path: string[] | null;
   pathMissing: boolean;
   colorByCommunity: boolean;
@@ -87,7 +88,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   let analysis = derive("global", null, 2, OPEN_PROFILE);
   let state: GraphViewState = {
     mode: "global", focusId: null, localCenterId: null, localDepth: 2, selectedId: null, hoverId: null,
-    pathSourceId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
+    pathSourceId: null, pathTargetId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
     pinned: new Set(cached.pinned.filter((id) => ids.has(id))),
     layout: { kind: "idle" }, cameraRatio: 1,
     profile: { ...OPEN_PROFILE }, search: "",
@@ -112,19 +113,13 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     const selectedId = has(state.selectedId) ? state.selectedId : null;
     const hoverId = has(state.hoverId) ? state.hoverId : null;
     const focusId = has(state.focusId) ? state.focusId : null;
-    const sourceVisible = has(state.pathSourceId);
-    let pathValid = sourceVisible;
-    if (state.path) {
-      const remaining = pathEdgeKeys(state.path);
-      for (const edge of derived.visibleModel.edges) {
-        const [a, b] = edge.source < edge.target ? [edge.source, edge.target] : [edge.target, edge.source];
-        remaining.delete(`${a}\u0000${b}`);
-        if (!remaining.size) break;
-      }
-      pathValid = sourceVisible && state.path.every((id) => has(id)) && remaining.size === 0;
+    const source = state.pathSourceId, target = state.pathTargetId;
+    if (!has(source) || (target !== null && !has(target))) {
+      return { derived, selectedId, hoverId, focusId, pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
     }
-    return { derived, selectedId, hoverId, focusId, pathSourceId: pathValid ? state.pathSourceId : null,
-      path: pathValid ? state.path : null, pathMissing: pathValid ? state.pathMissing : false };
+    const path = source && target ? shortestPath(derived.visibleModel, source, target) : null;
+    return { derived, selectedId, hoverId, focusId, pathSourceId: source, pathTargetId: target,
+      path, pathMissing: target !== null && path === null };
   };
 
   return {
@@ -142,11 +137,11 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       set({ ...reconcile(derived), mode, focusId: id, localCenterId: id, localDepth: depth, selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
     },
     pathTo(id) {
-      if (id === null) return set({ pathSourceId: null, path: null, pathMissing: false });
+      if (id === null) return set({ pathSourceId: null, pathTargetId: null, path: null, pathMissing: false });
       if (!known(id) || !visible(id)) return;
-      if (state.pathSourceId === null || state.path) return set({ pathSourceId: id, path: null, pathMissing: false });
+      if (state.pathSourceId === null || state.path) return set({ pathSourceId: id, pathTargetId: null, path: null, pathMissing: false });
       const path = shortestPath(state.derived.visibleModel, state.pathSourceId, id);
-      set({ path, pathMissing: path === null });
+      set({ pathTargetId: id, path, pathMissing: path === null });
     },
     togglePin(id) {
       if (!known(id)) return;
