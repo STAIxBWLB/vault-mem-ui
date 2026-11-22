@@ -60,3 +60,9 @@ test("a prerelease version with its own dated section passes", () => {
     }),
   ).toEqual([]);
 });
+
+test("package.json names the repository that provenance is signed for", async () => {
+  // npm refuses a provenance publish (E422) when repository.url does not match the workflow's repository.
+  const { repository } = await Bun.file(new URL("../package.json", import.meta.url)).json();
+  expect(repository?.url).toBe("git+https://github.com/STAIxBWLB/vault-mem-ui.git");
+});
