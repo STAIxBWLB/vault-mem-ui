@@ -20,7 +20,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      checks: read
     timeout-minutes: 25
     runs-on: ubuntu-latest
     steps:
@@ -86,6 +85,12 @@ jobs:
           const sha256 = createHash('sha256').update(readFileSync(join(dir, 'package.tgz'))).digest('hex');
           writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ name: pkg.name, version: pkg.version, tag: process.env.RELEASE_TAG, commit: process.env.RELEASE_SHA, sha256, distTag: pkg.version.includes('-') ? 'next' : 'latest' }) + '\n');
           NODE
+      # A green checkout does not prove the bytes npm receives do: a value import from a devDependency passes build,
+      # typecheck and staging, and only installing the tarball in a consumer shows it. Runs before the artifact upload.
+      - name: Install the staged tarball in a clean consumer
+        env:
+          RELEASE_TARBALL: ${{ runner.temp }}/release-package/package.tgz
+        run: bun scripts/package-smoke.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: release-${{ github.sha }}
@@ -184,6 +189,7 @@ jobs:
           const notes = [
             lines.slice(start + 1, end).join('\n').trim(), '',
             '## Install', '', '```', `npm i -g ${pkg.name}@${pkg.version}`, '```', '',
+            '`vmem-ui` runs under Bun, so Bun 1.4.2 or newer must be on `PATH`; the command refuses to start without it. As a panel, load the plugin from the `acon` console instead: `@staix/vault-mem-ui/ui-plugin`.', '',
             `Published to npm with provenance through GitHub OIDC trusted publishing. The validated tarball (SHA-256 \`${manifest.sha256}\`) and its manifest (tag, commit, SHA-256) from this run are attached.`,
             ...(previous ? ['', `**Full changelog**: https://github.com/${process.env.GITHUB_REPOSITORY}/compare/v${previous}...${process.env.RELEASE_TAG}`] : []),
           ].join('\n');
