@@ -44,19 +44,67 @@ const bad = [
   // Under Bun the global object also answers to `global`, and its names reach each other.
   'global.process.getBuiltinModule("node:fs")',
   'globalThis.self.process.getBuiltinModule("node:fs")',
+  // The loader is refused by name, so no call shape can slip past it: a comma expression, `.call`, `.apply`, the
+  // deprecated builtin binding, and an alias all name the same loader the calls above name.
+  '(0, require)("node:fs")',
+  '(0, process.getBuiltinModule)("node:fs")',
+  'require.call(null, "node:fs")',
+  'require.apply(null, ["node:fs"])',
+  'process.getBuiltinModule.call(process, "node:fs")',
+  'process.getBuiltinModule.apply(process, ["node:fs"])',
+  'process.binding("fs")',
+  'process["binding"]("fs")',
+  'const g = process.getBuiltinModule;\ng("node:fs")',
+  'const r = require;\nr("node:fs")',
+  'const viaModule = module.require;\nviaModule("node:fs")',
+  'const cr = createRequire;\ncr(import.meta.url)("node:fs")',
+  // A destructuring pattern is where the alias is created, so the key is refused there too: shorthand, renamed, and
+  // nested inside another pattern.
+  'const { getBuiltinModule } = process;\ngetBuiltinModule("node:fs")',
+  'const { getBuiltinModule: g } = process;\ng("node:fs")',
+  'const { binding } = process;\nbinding("fs")',
+  'function f({ process: { binding } }) { return binding("fs") }',
+  // A quoted key is the same key: `{ "getBuiltinModule": g } = process` introduces the alias without an identifier
+  // spelling the property's name as a name.
+  'const { "getBuiltinModule": g } = process;\ng("node:fs")',
+  'const { "binding": b } = process;\nb("fs")',
+  'const { "require": r } = module;\nr("node:fs")',
+  'const { "createRequire": cr } = mod;\ncr(import.meta.url)("node:fs")',
+  // A loader named with a builtin this list allows is still a loader, so these are refused too.
+  'const path = process.getBuiltinModule("node:path");',
+  'const path = createRequire(import.meta.url)("node:path");',
 ];
 
 test("boundary catches prohibited access", () => {
   for (const source of bad) expect(boundaryViolations(source, "example.ts")).not.toEqual([]);
   expect(boundaryViolations('import x from "@staix/vault-mem/ui-plugin"', "example.ts")).toEqual([]);
-  // What is refused is the load, not the name: a builtin this list allows and an ordinary process read both pass.
-  for (const allowed of [
-    'const path = process.getBuiltinModule("node:path");',
-    'const path = createRequire(import.meta.url)("node:path");',
-    "const flag = process.env.CI;",
-  ]) {
+  // What is refused is the loader, not the specifier it is called with, so what stays allowed names no loader at all.
+  // An array pattern's elements name no property, so they are not a destructuring alias of anything.
+  for (const allowed of ["const flag = process.env.CI;", "const [name] = list;"]) {
     expect(boundaryViolations(allowed, "example.ts")).toEqual([]);
   }
+});
+
+// Every refusal says where it is, which form was refused, and what to do instead: file and line, the loader name or
+// the `URL` key, and the provider route. A name written as a string is the same token, so the message says which string.
+test("a refusal names the file, the line, the form and the next step", () => {
+  expect(boundaryViolations('const fs = process.binding("fs");', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:1: binding is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
+  ]);
+  expect(boundaryViolations('const a = 1;\nconst fs = require("node:fs");', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:2: require is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
+  ]);
+  expect(boundaryViolations('const { "getBuiltinModule": g } = process;\ng("node:fs");', "src/client/probe.ts")).toEqual([
+    'src/client/probe.ts:1: the "getBuiltinModule" string is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)',
+    "src/client/probe.ts:1: loader owner cannot be passed or aliased; use a direct literal-keyed member such as process.env",
+  ]);
+  // A private name is refused by the name it spells and reported as it was written, with its `#`.
+  expect(boundaryViolations('class Probe { #require() { return 1 } }', "src/client/probe.ts")).toEqual([
+    "src/client/probe.ts:1: #require is forbidden; rename the token or route module loads through the @staix/vault-mem provider (snapshot/action)",
+  ]);
+  expect(boundaryViolations('import { readFileSync } from "node:fs";\nglobalThis["URL"] = class {};', reader)).toEqual([
+    'src/plugin/assets.ts:2: the "URL" string is forbidden in the panel asset reader; the reader may only name readFileSync, its two dist asset paths and the global URL constructor',
+  ]);
 });
 
 // The asset reader is the one file where `node:fs` is allowed, so the exception is checked at the call, not granted
@@ -121,6 +169,38 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] of [class {}]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-of target writing the global URL"],
   ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] in { own: class {} }) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-in target writing the global URL"],
   ['import { readFileSync } from "node:fs";\nfor ([globalThis["URL"]] of [[class {}]]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring for-of target writing the global URL"],
+  // The forms issue #20's merge gate found still passing. A `URL` key is refused wherever it is written, so the
+  // receiver, the destructuring shape and the template key stop mattering; a reflective writer is refused by name, so
+  // a `.call` on it and an alias of it are the same reference.
+  ['import { readFileSync } from "node:fs";\n(0, globalThis)["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a comma-expression receiver writing the global URL"],
+  ['import { readFileSync } from "node:fs";\nObject.defineProperty.call(null, globalThis, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperty.call write to the global URL"],
+  ['import { readFileSync } from "node:fs";\n({ a: globalThis["URL"] } = { a: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an object destructuring write to the global URL"],
+  ['import { readFileSync } from "node:fs";\n[[globalThis["URL"]]] = [[class {}]];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a nested destructuring write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nglobalThis[`URL`] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a template-keyed write to the global URL"],
+  ['import { readFileSync } from "node:fs";\nconst define = Object.defineProperty;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Object.defineProperty"],
+  ['import { readFileSync } from "node:fs";\nconst reflect = Reflect;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an alias of Reflect"],
+  // A destructuring pattern introduces the writer too, and `assign` writes a whole properties object whose keys are
+  // never the literal this check can read.
+  ['import { readFileSync } from "node:fs";\nObject.assign(globalThis, props);\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign of a properties object the check cannot read"],
+  ['import { readFileSync } from "node:fs";\nconst { defineProperty } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperty introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { assign } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { Reflect } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a Reflect introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { URL: U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a URL key read by destructuring"],
+  // A quoted key is the same key, in an object literal or in a pattern, and it names the writer or the URL that the
+  // identifier rules cannot see because the node is a string.
+  ['import { readFileSync } from "node:fs";\nconst { "defineProperty": d } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted defineProperty introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "assign": a } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted assign introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "Reflect": R } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted Reflect introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "URL": U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted URL key read by destructuring"],
+  // The same two classes in the shapes codex's rounds named: the other writer that takes a whole properties object, a
+  // quoted key inside a pattern, and a quoted URL key in an object literal rather than in a write.
+  ['import { readFileSync } from "node:fs";\nObject.defineProperties(globalThis, props);\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a defineProperties write of a properties object"],
+  ['import { readFileSync } from "node:fs";\nconst { "defineProperties": dp } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted defineProperties introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst spec = { "URL": 1 };\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted URL key in an object literal"],
+  // A key the check cannot read on the two objects that hand out loaders, refused for the same reason a global one is.
+  ['import { readFileSync } from "node:fs";\nconst loader = process[loaderKey];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on process"],
+  ['import { readFileSync } from "node:fs";\nconst loader = module[loaderKey];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on module"],
+  ['import { readFileSync } from "node:fs";\nglobalThis.self[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a computed key on the global object through globalThis.self"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
@@ -144,8 +224,57 @@ test("a global key the check cannot read is described as computed", () => {
     'import { readFileSync } from "node:fs";\nglobalThis[key] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")',
     reader,
   );
-  expect(found.filter((problem) => problem.includes("to a computed global key"))).not.toEqual([]);
-  expect(found.filter((problem) => problem.includes("string-keyed"))).toEqual([]);
+  expect(found).toEqual([
+    "src/plugin/assets.ts:2: a computed key on the global object; write the key as a literal",
+    "src/plugin/assets.ts:2: global owner cannot be passed or aliased in the panel asset reader; use a direct literal-keyed member",
+  ]);
+});
+
+// The check refuses a name it can read, so a name assembled at runtime is outside it. This test marks the limit rather
+// than leaving it implied: the concatenated key and the template with a substitution spell no single banned token.
+test("a name built at runtime is an allowed limitation", () => {
+  for (const source of [
+    'const g = other["get" + "BuiltinModule"];\ng("node:fs");',
+    'const g = other[`getBuiltin${"Module"}`];\ng("node:fs");',
+    'const g = globalThis; g.process[k];',
+  ]) expect(boundaryViolations(source, "example.ts")).toEqual([]);
+});
+
+test("literal global owner keys and global destructuring cannot hide owner access", () => {
+  for (const source of ['const p = globalThis["process"]; p["getBuiltin" + "Module"]("node:fs")', 'const p = self[`process`]', 'const { "process": p } = globalThis', '({ process: p } = globalThis)', 'Reflect.get(globalThis["process"], k)', 'globalThis["module"]', 'const { ["pro" + "cess"]: p } = globalThis']) {
+    expect({ source, refused: boundaryViolations(source, "src/client/probe.ts").length > 0 }).toEqual({ source, refused: true });
+  }
+  for (const source of ['const g = globalThis["self"]; g["U" + "RL"] = class {}', 'const { "self": g } = globalThis']) expect(boundaryViolations(source, reader)).not.toEqual([]);
+  expect(boundaryViolations('console.log("process")', "src/client/probe.ts")).toEqual([]);
+  expect(boundaryViolations('globalThis["process"].env', "src/client/probe.ts")).toEqual([]);
+});
+
+test("unknown computed keys on known global and loader objects are refused throughout src", () => {
+  for (const owner of ["process", "module", "globalThis", "self", "window", "global", "globalThis.self", 'globalThis["self"]', "globalThis.process", 'globalThis["module"]']) {
+    const found = boundaryViolations(`const key = "safe"; ${owner}[key];`, "src/client/probe.ts");
+    expect({ owner, refused: found.some((message) => message.includes("computed key")) }).toEqual({ owner, refused: true });
+  }
+  expect(boundaryViolations('const key="getBuiltinModule"; process[key]("node:fs")', "src/client/probe.ts")).not.toEqual([]);
+  expect(boundaryViolations('process["get" + "BuiltinModule"]', "src/client/probe.ts")).not.toEqual([]);
+});
+
+test("casts, comma receivers, owner aliases and computed destructuring are refused", () => {
+  for (const source of ['(process as any)[k]', 'process![k]', '(0, process)[k]', '(<any>process)[k]', '(process satisfies any)[k]', 'const { [k]: g } = process', 'const p = process', 'const p = globalThis.process', 'Reflect.get(process, k)', 'Object.getOwnPropertyDescriptor(module, k)']) {
+    expect({ source, refused: boundaryViolations(source, "src/client/probe.ts").length > 0 }).toEqual({ source, refused: true });
+  }
+  for (const source of ['(globalThis as any)["U" + "RL"] = class {}', 'const g = globalThis', 'Object.getOwnPropertyDescriptor(globalThis, k)']) {
+    expect({ source, refused: boundaryViolations(source, reader).length > 0 }).toEqual({ source, refused: true });
+  }
+});
+
+test("asset exports, quoted Bun aliases and import-equals are refused", () => {
+  for (const source of ['export { writeFileSync } from "node:fs"', 'export * from "node:fs"']) expect(boundaryViolations(source, reader).join(" ")).toContain("cannot re-export");
+  for (const source of ['globalThis["Bun"].write(p, x)', 'const { "Bun": B } = globalThis', 'globalThis[`Bun`].write(p, x)', 'import fs = require("node:fs")']) expect(boundaryViolations(source, "src/client/probe.ts")).not.toEqual([]);
+  expect(boundaryViolations('const binding = 1', "src/client/probe.ts").join(" ")).toContain("rename the token");
+  expect(boundaryViolations('process[key]', "src/client/probe.ts").join(" ")).toContain("write the key as a literal");
+  expect(boundaryViolations('const { "Bun": B } = globalThis', "src/client/probe.ts").join(" ")).toContain('the "Bun" string is forbidden; rename it');
+  expect(boundaryViolations('const p = process', "src/client/probe.ts").join(" ")).toContain("such as process.env");
+  expect(boundaryViolations('import fs = require("node:fs")', "src/client/probe.ts").join(" ")).toContain("use an import declaration");
 });
 
 test("every source file, including this package's own reader, passes the boundary", async () => {
