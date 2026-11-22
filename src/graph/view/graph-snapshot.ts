@@ -20,10 +20,12 @@ export async function assembleGraphPages(snapshot: Host["snapshot"], initial: Sn
 async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params: Record<string, string>, active: () => boolean): Promise<SnapshotReply> {
   if (first.error || first.unavailable || first.changed === false || first.schema !== 1) return first;
   const start = first as unknown as GraphPanelPage;
+  if (typeof start.revision !== "string" || !start.revision.trim())
+    return { error: "Graph provider returned a missing or invalid revision; update @staix/vault-mem or report its version." };
   if (!start.totals || !Number.isSafeInteger(start.totals.nodes) || !Number.isSafeInteger(start.totals.edges) || start.totals.nodes < 0 || start.totals.edges < 0)
-    return { error: "Graph provider returned malformed totals; check the provider and reload." };
+    return { error: "Graph provider returned malformed totals; update @staix/vault-mem or report its version." };
   if (start.totals.nodes > MAX_NODES || start.totals.edges > MAX_EDGES)
-    return { error: "Graph exceeds the panel's supported size (10,000 notes, 100,000 links); narrow the vault graph and reload." };
+    return { error: `Graphs larger than ${MAX_NODES.toLocaleString("en-US")} notes or ${MAX_EDGES.toLocaleString("en-US")} links are not supported in this panel yet; use Search or the note list instead.` };
   const nodes: GraphInput["nodes"] = [], edges: GraphInput["edges"] = [];
   const communities: Record<string, number> = Object.create(null);
   const seen = new Set<string>();
