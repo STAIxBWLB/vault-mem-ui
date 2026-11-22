@@ -10,8 +10,15 @@ import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console
 import { declaresPanel, manifestProblems, providerProblems } from "../../node_modules/@staix/agent-console/src/plugins.ts";
 import { GRAPH_UNAVAILABLE, graphAwareSnapshot, graphProvider, withGraphPanel } from "../../src/plugin/graph.ts";
 import { plugin } from "../../src/plugin/index.ts";
+import { PANEL_IDS } from "../../src/client/prefs.ts";
 import { run } from "../../src/server/cli.ts";
-import type { Host } from "../../src/server/host.ts";
+import { allowedPanels, type Host } from "../../src/server/host.ts";
+
+test("the declared panels match the implemented views and standalone routing", () => {
+  const declared = plugin.manifest.panels.map((panel) => panel.id);
+  expect(new Set(declared)).toEqual(new Set(PANEL_IDS));
+  expect(allowedPanels(plugin.manifest)).toEqual(new Set([...declared, "inbox", "search"]));
+});
 
 test("the plugin manifest declares graph, and acon's router accepts it", () => {
   expect(plugin.manifest.panels.map((p) => p.id)).toContain("graph");
