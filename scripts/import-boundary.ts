@@ -58,6 +58,19 @@ function propertyKey(node: ts.Node): string | undefined {
 }
 
 /**
+ * A key written as a string literal: `{ "name": value }` and, in a pattern, `{ "name": local } = source`. The key names
+ * the property while the node holding it is a string, so neither the identifier rule nor the computed-key rule sees it.
+ */
+function literalNameKey(node: ts.Node): string | undefined {
+  if (!ts.isStringLiteral(node) && !ts.isNoSubstitutionTemplateLiteral(node)) return undefined;
+  const parent = node.parent;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return node.text;
+  // In a pattern the string is `propertyName`; `name` is the local binding it lands in.
+  if (ts.isBindingElement(parent) && parent.propertyName === node) return node.text;
+  return undefined;
+}
+
+/**
  * A name written as a property key: `owner.name`, `{ name: value }`, and a destructuring `{ name }` or `{ name: local }`.
  * A destructuring pattern is where an alias of a loader is introduced (`const { getBuiltinModule } = process`), so a key
  * has to be recognised in a pattern as well as in an access.
@@ -73,6 +86,15 @@ function propertyName(node: ts.Node): string | undefined {
     if (!parent.propertyName && parent.name === node && ts.isObjectBindingPattern(parent.parent)) return node.text;
   }
   return undefined;
+}
+
+/**
+ * The key a node writes, however it is written: `owner.name`, `owner["name"]`, `{ name: ... }`, `{ "name": ... }`,
+ * `{ ["name"]: ... }`, and the destructuring form of each. One rule reads every spelling, which is what keeps a name
+ * from being refused in one shape and allowed in the next.
+ */
+function propertyKeyName(node: ts.Node): string | undefined {
+  return propertyKey(node) ?? literalNameKey(node) ?? propertyName(node);
 }
 
 /** The names a module loader answers to on its own, whichever way the reference is written. */
@@ -91,12 +113,8 @@ const REFLECTIVE_NAMES = new Set(["defineProperty", "defineProperties", "assign"
  * because an import binding or an alias is the same name.
  */
 function loaderReference(node: ts.Node): string | undefined {
-  const written = propertyName(node);
-  const keyed = propertyKey(node);
-  const name = written !== undefined && LOADER_PROPERTIES.has(written) ? written
-    : keyed !== undefined && LOADER_PROPERTIES.has(keyed) ? keyed
-    : undefined;
-  if (name !== undefined) return `the ${name} property`;
+  const key = propertyKeyName(node);
+  if (key !== undefined && LOADER_PROPERTIES.has(key)) return `the ${key} property`;
   return ts.isIdentifier(node) && LOADER_IDENTIFIERS.has(node.text) ? node.text : undefined;
 }
 
@@ -107,11 +125,9 @@ function loaderReference(node: ts.Node): string | undefined {
  * refused by the reference rather than by the shape of the call.
  */
 function reflectiveReference(node: ts.Node): string | undefined {
-  const written = propertyName(node);
-  const keyed = propertyKey(node);
-  const named = written ?? keyed;
-  if (named !== undefined && REFLECTIVE_NAMES.has(named)) return named === "Reflect" ? "Reflect" : `the ${named} property`;
-  if (written === undefined && keyed === undefined && ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
+  const key = propertyKeyName(node);
+  if (key !== undefined && REFLECTIVE_NAMES.has(key)) return key === "Reflect" ? "Reflect" : `the ${key} property`;
+  if (key === undefined && ts.isIdentifier(node) && node.text === "Reflect") return "Reflect";
   return undefined;
 }
 
@@ -259,10 +275,11 @@ export function assetReadProblems(source: ts.SourceFile, filename: string): stri
       problems.push(`${at(node)}: URL must be the global constructor and may not be rebound`);
     }
     // A `"URL"` key names the property without naming a binding, wherever it is written: `globalThis["URL"]`,
-    // `(0, globalThis)["URL"]`, a template key, an object's computed key and a destructuring target all land here.
-    // A key written as a plain name (`{ URL: u } = globalThis`) needs no rule of its own: the identifier rule above
-    // refuses that same `URL` wherever it appears.
-    if (propertyKey(node) === "URL") {
+    // `(0, globalThis)["URL"]`, a template key, an object's computed key, a quoted key (`{ "URL": u } = globalThis`)
+    // and a destructuring target all land here. A key written as a plain name needs no rule of its own: the identifier
+    // rule above refuses that same `URL` wherever it appears.
+    const urlKey = propertyKey(node) ?? literalNameKey(node);
+    if (urlKey === "URL") {
       problems.push(`${at(node)}: a URL property key may not replace the global URL; URL must be the global constructor and may not be rebound`);
     }
     // A reflective writer reaches the property without a key this check can read, so it is refused by name rather

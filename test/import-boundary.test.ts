@@ -64,6 +64,12 @@ const bad = [
   'const { getBuiltinModule: g } = process;\ng("node:fs")',
   'const { binding } = process;\nbinding("fs")',
   'function f({ process: { binding } }) { return binding("fs") }',
+  // A quoted key is the same key: `{ "getBuiltinModule": g } = process` introduces the alias without an identifier
+  // spelling the property's name as a name.
+  'const { "getBuiltinModule": g } = process;\ng("node:fs")',
+  'const { "binding": b } = process;\nb("fs")',
+  'const { "require": r } = module;\nr("node:fs")',
+  'const { "createRequire": cr } = mod;\ncr(import.meta.url)("node:fs")',
   // A loader named with a builtin this list allows is still a loader, so these are refused too.
   'const path = process.getBuiltinModule("node:path");',
   'const path = createRequire(import.meta.url)("node:path");',
@@ -172,6 +178,12 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\nconst { assign } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "an assign introduced by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst { Reflect } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a Reflect introduced by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst { URL: U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a URL key read by destructuring"],
+  // A quoted key is the same key, in an object literal or in a pattern, and it names the writer or the URL that the
+  // identifier rules cannot see because the node is a string.
+  ['import { readFileSync } from "node:fs";\nconst { "defineProperty": d } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted defineProperty introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "assign": a } = Object;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted assign introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "Reflect": R } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted Reflect introduced by destructuring"],
+  ['import { readFileSync } from "node:fs";\nconst { "URL": U } = globalThis;\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a quoted URL key read by destructuring"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
