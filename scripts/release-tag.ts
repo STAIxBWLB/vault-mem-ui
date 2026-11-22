@@ -7,8 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-
-const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+import { RELEASE_VERSION, hasDatedSection } from "./release-check.ts";
 
 export function releaseTag(cwd: string, push: boolean): string {
   const git = (...args: string[]) => execFileSync("git", args, { cwd, encoding: "utf8", timeout: 30_000 }).trim();
@@ -22,7 +21,7 @@ export function releaseTag(cwd: string, push: boolean): string {
     throw new Error("Main must be up to date with origin/main. Run git pull --ff-only; if main has local-only commits, move them to a PR branch first.");
   }
   const { version } = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as { version: string };
-  if (typeof version !== "string" || !VERSION.test(version)) {
+  if (typeof version !== "string" || !RELEASE_VERSION.test(version)) {
     throw new Error("Invalid package version. Bump package.json to a valid release version and add ## [x.y.z] - YYYY-MM-DD to CHANGELOG.md in a release-prep PR first.");
   }
   const tag = `v${version}`;
@@ -41,16 +40,11 @@ export function releaseTag(cwd: string, push: boolean): string {
   if (reuse && git("rev-parse", `refs/tags/${tag}^{commit}`) !== head) {
     throw new Error(`${tag} points elsewhere, not at HEAD ${head}. Inspect and delete the unpublished local tag, then recreate it with bun run release:tag --push.`);
   }
-  const versions = tags.filter((value) => !reuse || value !== tag).map((value) => value.slice(1)).filter((value) => VERSION.test(value));
+  const versions = tags.filter((value) => !reuse || value !== tag).map((value) => value.slice(1)).filter((value) => RELEASE_VERSION.test(value));
   if (versions.some((previous) => Bun.semver.order(version, previous) <= 0)) {
     throw new Error("Package version must be bumped above the existing release tags. Bump package.json and add ## [x.y.z] - YYYY-MM-DD to CHANGELOG.md in a release-prep PR first.");
   }
-  const heading = `## [${version}] - `;
-  if (
-    !readFileSync(join(cwd, "CHANGELOG.md"), "utf8")
-      .split("\n")
-      .some((line) => line.startsWith(heading) && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(line.slice(heading.length)))
-  ) {
+  if (!hasDatedSection(readFileSync(join(cwd, "CHANGELOG.md"), "utf8"), version)) {
     throw new Error("CHANGELOG needs a dated entry for the package version. Bump package.json and add ## [x.y.z] - YYYY-MM-DD to CHANGELOG.md in a release-prep PR first.");
   }
   if (!reuse) git("tag", "-a", tag, head, "-m", `Release ${tag}`);

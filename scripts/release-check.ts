@@ -1,7 +1,8 @@
 /**
  * What a release tag must satisfy before anything is packed or published: the tag names the package version, the
  * checkout is the commit the tag points at, and the changelog carries a dated section for that version. The release
- * workflow and the local dry run call the same function, so the rules cannot drift apart between them.
+ * workflow calls this, and `scripts/release-tag.ts` imports the two rules below from here, so the workflow and the tag
+ * command agree on what a release version and a dated changelog section are.
  *
  * Mirrored from vault-mem's release workflow, whose refusals are a tag that does not match the package version and a
  * changelog whose only section is `Unreleased`.
@@ -10,7 +11,16 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+/** A release version: `1.2.3`, optionally with a prerelease suffix such as `-rc.1`. */
+export const RELEASE_VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
+/** Whether the changelog carries `## [version] - YYYY-MM-DD`, the section a release is cut from. */
+export function hasDatedSection(changelog: string, version: string): boolean {
+  const heading = `## [${version}] - `;
+  return changelog
+    .split("\n")
+    .some((line) => line.startsWith(heading) && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(line.slice(heading.length)));
+}
 
 export interface ReleaseFacts {
   /** The tag being released, as `github.ref_name` reads it, e.g. `v0.1.0`. */
@@ -28,7 +38,7 @@ export interface ReleaseFacts {
 /** Every problem the tag has; an empty list means it may be packed. */
 export function releaseProblems({ tag, sha, head, version, changelog }: ReleaseFacts): string[] {
   const problems: string[] = [];
-  if (!VERSION.test(version)) {
+  if (!RELEASE_VERSION.test(version)) {
     problems.push(
       `package.json version ${JSON.stringify(version)} is not a release version. Set a valid version and its dated changelog section in a release-prep PR, then tag that commit.`,
     );
@@ -41,11 +51,7 @@ export function releaseProblems({ tag, sha, head, version, changelog }: ReleaseF
   if (sha !== head) {
     problems.push(`Checkout ${sha} is not the commit the tag points at (${head}). Re-run this workflow from the tag rather than from a branch.`);
   }
-  const heading = `## [${version}] - `;
-  const dated = changelog
-    .split("\n")
-    .some((line) => line.startsWith(heading) && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(line.slice(heading.length)));
-  if (!dated) {
+  if (!hasDatedSection(changelog, version)) {
     problems.push(
       `CHANGELOG.md has no dated section for ${version}. Move the Unreleased entries under ## [${version}] - YYYY-MM-DD in a release-prep PR; Unreleased on its own is not a release.`,
     );
