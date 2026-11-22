@@ -225,6 +225,48 @@ test("history: a half-picked pair survives paging, so revisions on two pages can
   });
 });
 
+test("history: a shown pair and a link-carried end both survive a revisions page turn", () => {
+  const navigations: unknown[] = [];
+  // The pair is on screen after Show changes, so it lives in from/to and in nothing else of the view's own.
+  mount(
+    <HistoryView
+      reply={{ ...historyReply, changes: { from: older.revision, to: newer.revision, changed: [], total: 0, truncated: false, skippedDenied: 0, skippedSymlink: 0 } }}
+      params={{ path: "notes/a.md", from: older.revision, to: newer.revision }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+  click(button("Older revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", cursor: "h2", pickFrom: older.revision, pickTo: newer.revision },
+  });
+
+  // The next page is a fresh mount, and both ends are still chosen there: the pair is one click from being compared.
+  act(() => root.unmount());
+  container.remove();
+  mount(
+    <HistoryView
+      reply={{ ...historyReply, history: { ...history, revisions: [third], continuation: undefined } }}
+      params={{ path: "notes/a.md", cursor: "h2", pickFrom: older.revision, pickTo: newer.revision }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+  expect(container.textContent).toContain("From aaaaaaaaaaaa to cccccccccccc");
+  expect(button("Show changes")!.hasAttribute("disabled")).toBe(false);
+
+  // A link that carries one end in from= keeps it too, rather than losing it to a cursor-only page turn.
+  act(() => root.unmount());
+  container.remove();
+  mount(<HistoryView reply={historyReply} params={{ path: "notes/a.md", from: older.revision }} navigate={navigate(navigations)} beginWrite={() => {}} />);
+  click(button("Older revisions")!);
+  expect(navigations.at(-1)).toEqual({
+    panel: "history",
+    params: { vault: "work", path: "notes/a.md", cursor: "h2", pickFrom: older.revision },
+  });
+});
+
 test("history: a refusal shows only the provider's own sentence, and a coverage gap names its reason", () => {
   const navigations: unknown[] = [];
   const gap = { path: "notes/a.md", revisions: [], coverage: { complete: false, reason: "this vault is not a git repository root; point the client at the vault's top level, then reload" } };
@@ -290,12 +332,18 @@ test("history: the changes between two revisions, paged, with deleted notes show
   click(button("More changes")!);
   expect(navigations.at(-1)).toEqual({
     panel: "history",
-    params: { vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision, changesCursor: "ch2" },
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: older.revision, pickTo: newer.revision, changesCursor: "ch2",
+    },
   });
   click(button("First page")!);
   expect(navigations.at(-1)).toEqual({
     panel: "history",
-    params: { vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision },
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: older.revision, pickTo: newer.revision,
+    },
   });
 });
 
@@ -326,13 +374,16 @@ test("history: paging the changes keeps the pair on screen, and a newer pick rid
     panel: "history",
     params: {
       vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
-      pickFrom: third.revision, changesCursor: "ch2",
+      pickFrom: third.revision, pickTo: newer.revision, changesCursor: "ch2",
     },
   });
   click(button("First page")!);
   expect(navigations.at(-1)).toEqual({
     panel: "history",
-    params: { vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision, pickFrom: third.revision },
+    params: {
+      vault: "work", path: "notes/a.md", from: older.revision, to: newer.revision,
+      pickFrom: third.revision, pickTo: newer.revision,
+    },
   });
 });
 

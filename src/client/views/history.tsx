@@ -37,10 +37,11 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   const ready = pending.from !== "" && pending.to !== "" && pending.from !== pending.to;
   const nav = (extra: Record<string, string>) =>
     navigate("history", { ...(vault ? { vault } : {}), ...(path ? { path } : {}), ...extra });
+  // Every chosen end is carried, including one that also appears as from/to: the revisions buttons send the cursor and
+  // this pick only, so a skipped end would leave a shown pair behind on the next page.
   const pickParams = (): Record<string, string> => ({
-    // An end that still matches the pair already in the params needs no second copy.
-    ...(pending.from && pending.from !== str(params.from) ? { [PICK_FROM]: pending.from } : {}),
-    ...(pending.to && pending.to !== str(params.to) ? { [PICK_TO]: pending.to } : {}),
+    ...(pending.from ? { [PICK_FROM]: pending.from } : {}),
+    ...(pending.to ? { [PICK_TO]: pending.to } : {}),
   });
   // Changes paging stays on the pair that produced the list: an old changesCursor sent with a newer pick would page a
   // list the person is no longer looking at. The pick rides along, so choosing a new pair survives a page turn too.
