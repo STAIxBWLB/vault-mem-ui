@@ -18,15 +18,16 @@ export function SettingsView({ reply, beginWrite }: ViewProps) {
   return <form key={JSON.stringify([vault, defaults])} className="vmem-card vmem-form" aria-label="Vault settings" onChange={() => setMessage("")} onSubmit={(event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+    const piiText = String(form.get("piiPatterns") ?? "");
     const values = {
       defaultVault: String(form.get("defaultVault") ?? ""),
       write: String(form.get("write") ?? ""),
-      piiPatterns: String(form.get("piiPatterns") ?? "").split(/\r?\n/).filter((line) => line !== ""),
       graphResolution: Number(form.get("graphResolution")),
       enrichmentEnabled: form.has("enrichmentEnabled"),
     };
-    const changes = Object.fromEntries(Object.entries(values).filter(([key, value]) =>
+    const changes: Record<string, unknown> = Object.fromEntries(Object.entries(values).filter(([key, value]) =>
       JSON.stringify(value) !== JSON.stringify(defaults[key as keyof typeof defaults])));
+    if (piiText !== defaults.piiPatterns.join("\n")) changes.piiPatterns = piiText.split(/\r?\n/).filter((line) => line.trim() !== "");
     if (!Object.keys(changes).length) { setMessage("No values changed. Edit a setting, then preview again."); return; }
     setMessage("");
     beginWrite({ action: "settings", vault, changes });

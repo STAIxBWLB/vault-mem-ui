@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { VIEWS } from "../../src/client/App.tsx";
+import { App, VIEWS } from "../../src/client/App.tsx";
+import { createStore } from "../../src/client/store.ts";
 import { PANEL_IDS } from "../../src/client/prefs.ts";
 import { SettingsView } from "../../src/client/views/settings.tsx";
 import { createFakeHost } from "../../src/client/fake.ts";
@@ -32,6 +33,41 @@ test("settings submits only edited values for the displayed vault", () => {
   write.value = "none";
   act(() => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
   expect(submitted).toEqual({ action: "settings", vault: "work", changes: { write: "none" } });
+});
+
+test("untouched patterns stay unchanged and blank lines are not patterns", () => {
+  const calls: ActionInput[] = [];
+  container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  act(() => root.render(<SettingsView reply={{ vault: "work", defaultVault: "work", write: "mcp", piiPatterns: ["a", "", "b\nc"], graphResolution: 1, enrichmentEnabled: false }} params={{}} navigate={() => {}} beginWrite={(input) => calls.push(input)} />));
+  container.querySelector<HTMLSelectElement>("#settings-write")!.value = "none";
+  const form = container.querySelector("form")!;
+  act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(calls[0]).toEqual({ action: "settings", vault: "work", changes: { write: "none" } });
+  container.querySelector<HTMLTextAreaElement>("#settings-pii")!.value = "secret\n  \nother";
+  act(() => form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(calls[1]).toEqual({ action: "settings", vault: "work", changes: { write: "none", piiPatterns: ["secret", "other"] } });
+});
+
+test("settings form previews and confirms through the app store, then refreshes", async () => {
+  let write = "mcp";
+  const host = createFakeHost({ snapshots: { settings: () => ({ vault: "work", defaultVault: "work", write, piiPatterns: [], graphResolution: 1, enrichmentEnabled: false }) } });
+  host.action = async (input) => {
+    host.calls.action.push(input);
+    if (!input.confirmed) return { ok: false, needsConfirm: true, fingerprint: "fp", verb: "Change settings", preview: ['write: "none"'] };
+    write = "none";
+    return { ok: true, message: "Settings updated; restart the console and MCP server" };
+  };
+  const store = createStore(host, { initialPanel: "settings" });
+  container = document.createElement("div"); document.body.append(container); root = createRoot(container);
+  await act(async () => { root.render(<App store={store} />); await store.refresh(); });
+  container.querySelector<HTMLSelectElement>("#settings-write")!.value = "none";
+  await act(async () => { container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })); });
+  expect(container.textContent).toContain('write: "none"');
+  expect(host.calls.action).toHaveLength(1);
+  await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Confirm")!.click(); });
+  expect(host.calls.action[1]).toEqual({ action: "settings", vault: "work", changes: { write: "none" }, confirmed: true, fingerprint: "fp" });
+  expect(container.textContent).toContain("Settings updated; restart the console and MCP server");
+  expect(container.querySelector<HTMLSelectElement>("#settings-write")!.value).toBe("none");
 });
 
 test("settings preview, stale confirmation and refusal preserve the provider response", async () => {
