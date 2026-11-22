@@ -15,7 +15,8 @@ export const plugin: ConsolePlugin = {
   async open(ctx: ConsoleContext): Promise<ConsoleProvider> {
     const provider = await vaultPlugin.open(ctx);
     // Every member is forwarded through a call, so a member the provider binds to its own instance keeps working.
-    return { ...graphProvider(provider), assets: panelAssets() };
+    // The provider's declared actions ride along with the graph snapshot, so the panel offers only what it declares.
+    return { ...graphProvider(provider, plugin.manifest.capabilities?.actions ?? []), assets: panelAssets() };
   },
 };
 

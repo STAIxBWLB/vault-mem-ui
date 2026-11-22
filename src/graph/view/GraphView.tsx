@@ -6,14 +6,16 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Empty, Notice } from "../../client/components.tsx";
+import type { SnapshotReply } from "../../client/host.ts";
 import { vaultParam, type ViewProps } from "../../client/views/common.ts";
+import { linkAction } from "../../client/write.ts";
 import { startLayout, type LayoutHandle } from "../layout/client";
 import { buildGraphModel, type GraphModel } from "../model";
 import type { GraphInput } from "../types";
 import { hashPosition, loadCanvasDeps, mountGraphCanvas, type CanvasDeps, type GraphCanvasHandle } from "./canvas";
 import type { CacheStorage } from "./cache";
 import { LOD_EDGE_THRESHOLD } from "./lod";
-import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend } from "./SidePanels";
+import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend, type LinkProposal } from "./SidePanels";
 import { createGraphViewStore, type GraphViewStore, type LayoutStatus } from "./state";
 
 /** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph).
@@ -67,7 +69,15 @@ export function graphContent(input: GraphInput): string {
   return JSON.stringify(input);
 }
 
-export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
+/** The actions the provider declared for this panel, as its manifest's `capabilities.actions` reached the reply. */
+export function declaredActions(reply: SnapshotReply): string[] {
+  const capabilities = reply.capabilities;
+  if (!capabilities || typeof capabilities !== "object") return [];
+  const actions = (capabilities as { actions?: unknown }).actions;
+  return Array.isArray(actions) ? actions.filter((action): action is string => typeof action === "string") : [];
+}
+
+export function GraphPanel({ reply, params, navigate, theme, beginWrite }: ViewProps) {
   // Every poll or push hands over a new reply object; only a changed graph may rebuild the view (and its worker).
   // Content is compared exactly (no hash, so no collisions); the generation counter is the React key.
   const parsed = useMemo(() => readGraphInput(reply.graph), [reply.graph]);
@@ -84,10 +94,10 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
     return <Empty title="Graph not available" hint={reason.charAt(0).toUpperCase() + reason.slice(1) + "."} />;
   }
   if (model.nodes.length === 0) return <Empty title="No notes to graph" hint="Add notes or links to the vault, then reload this panel." />;
-  return <>{Number((reply.graphStats as { placeholdersOmitted?: number } | undefined)?.placeholdersOmitted) > 0 && <Notice tone="warn">Some unresolved links were omitted by the provider because the graph reached its size limit.</Notice>}<GraphCanvasView key={generation} model={model} params={params} navigate={navigate} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} /></>;
+  return <>{Number((reply.graphStats as { placeholdersOmitted?: number } | undefined)?.placeholdersOmitted) > 0 && <Notice tone="warn">Some unresolved links were omitted by the provider because the graph reached its size limit.</Notice>}<GraphCanvasView key={generation} model={model} params={params} navigate={navigate} beginWrite={beginWrite} canLink={declaredActions(reply).includes("link")} themeKey={theme ? theme.mode + JSON.stringify(theme.tokens ?? {}) : ""} /></>;
 }
 
-function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {
+function GraphCanvasView({ model, params, navigate, beginWrite, canLink, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; beginWrite: ViewProps["beginWrite"]; canLink: boolean; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
   const hasSupersedes = useMemo(() => model.edges.some((edge) => edge.relation === "supersedes" || edge.relation === "superseded_by"), [model]);
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
@@ -210,6 +220,9 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
     if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
   }, [model, navigate, params]);
   const focusChain = useCallback((ids: string[]) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }, [store]);
+  // A proposed link is a write like any other: the store previews it through the provider's two-step action and the
+  // shared dialog confirms it, so the control is only offered when the provider declares that action.
+  const link = useMemo<LinkProposal | undefined>(() => (canLink ? { propose: (input) => beginWrite(linkAction({ ...input, ...vaultParam(params) })) } : undefined), [canLink, beginWrite, params]);
 
   return (
     <section className="vmem-graph" aria-label="Vault graph">
@@ -242,7 +255,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} search={state.search} focus={focusChain} open={openNote} />}
         <GraphFilterPanel state={state} store={store} />
         <GraphLegend state={state} themeKey={themeKey} />
-        <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />
+        <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} link={link} />
         <GraphInsightsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} select={(id) => store.select(id)} />
       </aside>
       <p id={selectedTextId} className="vmem-sub" aria-live="polite">

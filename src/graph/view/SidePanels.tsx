@@ -1,5 +1,6 @@
 /** Read-only controls adapted from STAIxBWLB/maru@b33341df src/components/graph/GraphFilterPanel, GraphLegend, GraphInspector and GraphInsightsPanel. */
 import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { LINK_RELATIONS, type LinkRelation } from "../../client/write.ts";
 import { findBridges, findHiddenLinks, findOrphans, findSurprisingConnections } from "../insights";
 import { buildDecisionChains } from "../decisionChains";
 import type { GraphModel, GraphNode } from "../model";
@@ -12,6 +13,14 @@ import { OPEN_PROFILE } from "./state";
 
 /** Chain groups use the existing maru-derived decisionChains.ts model. */
 const CHAIN_LIST_LIMIT = 50;
+/** Targets the inspector lists before asking for a narrower graph, as the chain lists do. */
+const LINK_TARGET_LIMIT = 200;
+
+/** What the inspector may offer when the provider declares the `link` action; absent means the control is hidden. */
+export interface LinkProposal {
+  propose(input: { from: string; to: string; relation: LinkRelation; bidirectional: boolean }): void;
+}
+
 export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleIds, chainFocusIds, hasSupersedes, search = "", focus, open }: { model: GraphModel; visibleIds: Set<string>; chainFocusIds: Set<string>; hasSupersedes: boolean; search?: string; focus(ids: string[]): void; open(id: string): void }) {
   const layout = useMemo(() => buildDecisionChains(model), [model]);
   const shown = useMemo(() => {
@@ -82,11 +91,45 @@ export function GraphLegend({ state, themeKey = "" }: { state: GraphViewState; t
   return <section className="vmem-card vmem-graph-panel" aria-label="Graph legend"><h2 className="vmem-card-title">Legend</h2><p>Node size reflects link count. Unresolved notes use the canvas background. Selected and path nodes are highlighted.</p><p>Arrows represent frontmatter links; lines represent other links.</p>{state.colorByCommunity && communities.length > 0 && <ul ref={swatches} aria-label="Community colours">{communities.map((item) => <li key={item.value}><span className="vmem-community-swatch" data-community={item.value} aria-hidden="true" /> Community {item.value}</li>)}</ul>}</section>;
 }
 
-export function GraphInspector({ node, model, open }: { node: GraphNode | null; model: GraphModel; open(id: string): void }) {
+/**
+ * The link form: a second note and one of the provider's relations. It only proposes — the shared write dialog shows
+ * the provider's preview and its planned changes, and nothing reaches the vault before Confirm.
+ */
+function LinkForm({ node, model, propose }: { node: GraphNode; model: GraphModel; propose: LinkProposal["propose"] }) {
+  const [to, setTo] = useState("");
+  const [relation, setRelation] = useState<LinkRelation>(LINK_RELATIONS[0]);
+  const [bidirectional, setBidirectional] = useState(true);
+  // A placeholder link has no file behind it, so only notes the provider gave a path can be a target.
+  const targets = useMemo(() => model.nodes.filter((item) => item.id !== node.id && item.relPath).sort((a, b) => a.label.localeCompare(b.label)), [model, node.id]);
+  const from = node.relPath;
+  const chosen = targets.find((item) => item.id === to);
+  if (!from) return <p>This note is an unresolved link with no file, so a link cannot start here. Open the note it points at, or add it first.</p>;
+  if (!targets.length) return <p>No other note in this graph can be a link target. Clear search and filters, or add another note first.</p>;
+  return (
+    <>
+      <h3>Link this note</h3>
+      <label htmlFor="vmem-graph-link-target">Link to</label>
+      <select id="vmem-graph-link-target" className="vmem-input" value={chosen?.id ?? ""} onChange={(event) => setTo(event.currentTarget.value)}>
+        <option value="">Choose a note</option>
+        {targets.slice(0, LINK_TARGET_LIMIT).map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select>
+      {targets.length > LINK_TARGET_LIMIT && <p className="vmem-sub">Showing the first {LINK_TARGET_LIMIT} of {targets.length} notes by label; search or filter to narrow.</p>}
+      <label htmlFor="vmem-graph-link-relation">Relation</label>
+      <select id="vmem-graph-link-relation" className="vmem-input" value={relation} onChange={(event) => setRelation(event.currentTarget.value as LinkRelation)}>
+        {LINK_RELATIONS.map((item) => <option key={item} value={item}>{item}</option>)}
+      </select>
+      <label className="vmem-graph-option"><input type="checkbox" checked={bidirectional} onChange={(event) => setBidirectional(event.currentTarget.checked)} /> Both directions</label>
+      <button type="button" className="vmem-button" disabled={!chosen?.relPath} onClick={() => { if (chosen?.relPath) propose({ from, to: chosen.relPath, relation, bidirectional }); }}>Propose link</button>
+      <p className="vmem-sub">Nothing is written until you confirm the preview.</p>
+    </>
+  );
+}
+
+export function GraphInspector({ node, model, open, link }: { node: GraphNode | null; model: GraphModel; open(id: string): void; link?: LinkProposal }) {
   if (!node) return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><p>Select a note to inspect it.</p></section>;
   const labels = new Map(model.nodes.map((item) => [item.id, item.label]));
   const related = model.edges.filter((edge) => edge.source === node.id || edge.target === node.id);
-  return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}</section>;
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}{link ? <LinkForm node={node} model={model} propose={link.propose} /> : null}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}</section>;
 }
 
 export function GraphInsightsPanel({ model, visibleIds, select }: { model: GraphModel; visibleIds: Set<string>; select(id: string): void }) {
