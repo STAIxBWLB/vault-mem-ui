@@ -19,7 +19,7 @@ function decision(id: string, date: string | null): GraphNode {
 }
 
 function supersedes(source: string, target: string): GraphEdge {
-  return { source, target, relation: "supersedes", fromFrontmatter: true, origin: "workspace" };
+  return { source, target, relation: "supersedes", fromFrontmatter: true, inferred: false, origin: "workspace" };
 }
 
 function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
@@ -27,9 +27,14 @@ function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
 }
 
 describe("buildDecisionChains", () => {
+  it("orders simultaneously ready decisions by date and ID", () => {
+    const nodes = [decision("root", "2020-01-01"), decision("z", "2022-01-01"), decision("b", "2021-01-01"), decision("a", "2021-01-01")];
+    const layout = buildDecisionChains(model(nodes, [supersedes("z", "root"), supersedes("b", "root"), supersedes("a", "root")]));
+    expect(layout.chains[0]!.nodes.map((node) => node.id)).toEqual(["root", "a", "b", "z"]);
+  });
   it("orders by relation direction even when dates disagree and reciprocal fields repeat an edge", () => {
     const nodes = [decision("old", "2027-01-01"), decision("middle", null), decision("new", "2020-01-01")];
-    const reciprocal: GraphEdge = { source: "old", target: "middle", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" };
+    const reciprocal: GraphEdge = { source: "old", target: "middle", relation: "superseded_by", fromFrontmatter: true, inferred: false, origin: "workspace" };
     const layout = buildDecisionChains(model(nodes, [supersedes("middle", "old"), reciprocal, supersedes("new", "middle")]));
     expect(layout.chains).toHaveLength(1);
     expect(layout.chains[0]!.nodes.map((node) => node.id)).toEqual(["old", "middle", "new"]);
@@ -69,8 +74,8 @@ describe("buildDecisionChains", () => {
       model(
         [decision("d1", "2026-01-01"), decision("d2", "2026-02-01"), insight],
         [
-          { source: "d1", target: "not-a-decision", relation: "supersedes", fromFrontmatter: true, origin: "workspace" },
-          { source: "d1", target: "d2", relation: "superseded_by", fromFrontmatter: true, origin: "workspace" },
+          { source: "d1", target: "not-a-decision", relation: "supersedes", fromFrontmatter: true, inferred: false, origin: "workspace" },
+          { source: "d1", target: "d2", relation: "superseded_by", fromFrontmatter: true, inferred: false, origin: "workspace" },
         ],
       ),
     );

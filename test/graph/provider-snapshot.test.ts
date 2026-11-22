@@ -30,6 +30,8 @@ beforeAll(async () => {
     { stem: "beta", type: "insight", domain: "research", title: "Beta", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
     { stem: "alpha", type: "insight", domain: "research", title: "Alpha", description: "Synthetic note", topics: ["index"], body: "- [[beta]] (supports)\n\n## Topics\n\n- [[index]]" },
     { stem: "unused", type: "insight", domain: "research", title: "Unused", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
+    { stem: "infer-source", type: "insight", domain: "research", title: "Infer source", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
+    { stem: "infer-target", type: "insight", domain: "research", title: "Infer target", description: "Synthetic note", topics: ["index"], body: "Synthetic.\n\n## Topics\n\n- [[index]]" },
   ];
   for (const entry of entries) {
     const result = await writer.handlers.vmem_create!(entry) as { applied?: boolean; issues?: unknown };
@@ -43,6 +45,13 @@ beforeAll(async () => {
     const result = await writer.handlers.vmem_set_frontmatter!({ vault: "test", path: `notes/${stem}.md`, set: { [field!]: `[[${target}]]` } }) as { applied?: boolean; issues?: unknown };
     if (!result.applied) throw new Error(`Synthetic relation refused: ${JSON.stringify(result.issues)}`);
   }
+  const source = await writer.handlers.vmem_read!({ vault: "test", path: "notes/infer-source.md" }) as { sha256: string };
+  const proposal = await writer.handlers.vmem_proposal_submit!({ vault: "test", operation: { op: "infer-link", path: "notes/infer-source.md", target: "notes/infer-target.md", expectedSha: source.sha256 } }) as { stored?: boolean; id?: string; issues?: unknown };
+  if (!proposal.stored || !proposal.id) throw new Error(`Synthetic inferred link proposal refused: ${JSON.stringify(proposal.issues)}`);
+  const preview = await writer.handlers.vmem_proposal_apply!({ vault: "test", id: proposal.id }) as { fingerprint?: string; issues?: unknown };
+  if (!preview.fingerprint) throw new Error(`Synthetic inferred link preview refused: ${JSON.stringify(preview.issues)}`);
+  const applied = await writer.handlers.vmem_proposal_apply!({ vault: "test", id: proposal.id, confirm: true, fingerprint: preview.fingerprint }) as { applied?: boolean; issues?: unknown };
+  if (!applied.applied) throw new Error(`Synthetic inferred link refused: ${JSON.stringify(applied.issues)}`);
   process.env.VMEM_HOME = home;
   process.env.AMEM_HOME = join(root, "memory");
   provider = await providerPlugin.open({ home, log: () => {} });
@@ -62,10 +71,11 @@ test("actual provider pages assemble and match its neighbors and path queries", 
   const edgeColumns = edgePage.columns as { source: number[]; target: number[]; rel: (string | null)[] };
   const edgeIndex = edgeColumns.source.findIndex((source, i) => nodeColumns.id[source] === "alpha" && nodeColumns.id[edgeColumns.target[i]!] === "beta");
   expect(edgeColumns.rel[edgeIndex]).toBe("supports");
-  expect(graph.edges).toContainEqual({ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: false });
+  expect(graph.edges).toContainEqual({ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: false, inferred: false });
   const alphaIndex = nodeColumns.id.indexOf("alpha");
   expect(nodeColumns.community[alphaIndex]).not.toBeNull();
   expect(graph.communities?.alpha).toBe(nodeColumns.community[alphaIndex] ?? undefined);
+  expect(graph.edges).toContainEqual({ source: "infer-source", target: "infer-target", relation: "wiki_link", fromFrontmatter: false, inferred: true });
   expect(assembled.graphStats).toMatchObject({ pages: 2 });
   const neighbors = await snapshot({ panel: "graph", vault: "test", neighbors: "alpha" });
   expect((neighbors.neighborhood as { nodes: { id: string }[] }).nodes.map((node) => node.id)).toContain("beta");
@@ -122,12 +132,30 @@ function fakePages(name = "missing"): (GraphPanelPage & Record<string, unknown>)
   ];
 }
 
+test("edge confidence accepts scalar and per-edge tags, and rejects malformed tags", async () => {
+  const pages = fakePages();
+  const edge = pages[1]!;
+  const columns = edge.columns as import("@staix/vault-mem/ui-plugin").GraphEdgeColumns;
+  const assemble = (tags: unknown) => assembleGraphPages(async (input) => input.page ? ({ ...edge, columns: { ...columns, confidence_tag: tags } }) : pages[0]!, pages[0]!, {});
+  for (const [tag, inferred] of [["EXTRACTED", false], ["INFERRED", true], [["EXTRACTED"], false], [["INFERRED"], true]] as const) {
+    expect(((await assemble(tag)).graph as GraphInput).edges[0]!.inferred).toBe(inferred);
+  }
+  const totals = { ...pages[0]!.totals, edges: 2 };
+  const first = { ...pages[0]!, totals };
+  const mixed = { ...edge, totals, count: 2, columns: { ...columns, source: [0, 1], target: [1, 0], relation: [0, 0], field: [null, null], rel: [null, null], confidence_tag: ["INFERRED", "EXTRACTED"] } };
+  const result = await assembleGraphPages(async () => mixed, first, {});
+  expect((result.graph as GraphInput).edges.map((item) => item.inferred)).toEqual([true, false]);
+  for (const invalid of ["UNKNOWN", [], ["INFERRED", "EXTRACTED"], ["UNKNOWN"], Array(1), null]) {
+    expect((await assemble(invalid)).error).toBe("Graph edge columns are invalid; restart from the first page.");
+  }
+});
+
 test("provider columnar unresolved placeholders stay non-navigable", async () => {
   const pages = fakePages();
   let i = 0;
   const result = await assembleGraphPages(async () => ({ ...pages[++i]!, cursor: i }), { ...pages[0]!, cursor: 0 }, {});
   expect((result.graph as GraphInput).nodes.find((node) => node.id === "missing")).toMatchObject({ relPath: null });
-  expect((result.graph as GraphInput).edges).toContainEqual({ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false });
+  expect((result.graph as GraphInput).edges).toContainEqual({ source: "a", target: "missing", relation: "wiki_link", fromFrontmatter: false, inferred: false });
 });
 
 test("an assembled reply keeps the first page's declared actions, and invents none", async () => {

@@ -269,9 +269,10 @@ export function originEdgeColor(origin: GraphEdgeOrigin): string {
  *  otherwise the relation-color opt-in still owns frontmatter edges and body
  *  `wiki_link` edges stay neutral. Hover/selection reducers override this. */
 export function edgeColor(
-  edge: Pick<GraphEdge, "relation" | "fromFrontmatter" | "origin">,
+  edge: Pick<GraphEdge, "relation" | "fromFrontmatter" | "origin"> & Partial<Pick<GraphEdge, "inferred">>,
   display: Pick<GraphDisplaySettings, "relationColors" | "colorMode">,
 ): string {
+  if (edge.inferred) return activeTheme.warn;
   if (display.colorMode === "origin") return activeTheme.originEdgeColors[edge.origin];
   if (display.relationColors && edge.fromFrontmatter) return relationColor(edge.relation);
   return activeTheme.edge;

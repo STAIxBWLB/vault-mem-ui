@@ -32,10 +32,10 @@ export function generateGraphInput(nodeCount: number, edgeCount: number, seed = 
     });
     for (let l = 0; l < outDegree; l += 1) {
       const target = Math.floor(rand() * nodeCount);
-      if (target !== i) input.edges.push({ source: `note-${i}`, target: `note-${target}`, relation: "wiki_link", fromFrontmatter: false });
+      if (target !== i) input.edges.push({ source: `note-${i}`, target: `note-${target}`, relation: "wiki_link", fromFrontmatter: false, inferred: false });
     }
     if (i % 5 === 0 && nodeCount > 1) {
-      input.edges.push({ source: `note-${i}`, target: `note-${(i + 1) % nodeCount}`, relation: "topics", fromFrontmatter: true });
+      input.edges.push({ source: `note-${i}`, target: `note-${(i + 1) % nodeCount}`, relation: "topics", fromFrontmatter: true, inferred: false });
     }
   }
   return input;

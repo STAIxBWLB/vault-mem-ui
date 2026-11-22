@@ -4,9 +4,19 @@ import { buildGraphModel } from "../../../src/graph/model";
 import { createGraphViewStore } from "../../../src/graph/view/state";
 import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphLegend } from "../../../src/graph/view/SidePanels";
 
+test("legend and inspector identify inferred links", () => {
+  const model = buildGraphModel({ nodes: [{ id: "a", label: "A", relPath: "notes/a.md" }, { id: "b", label: "B", relPath: "notes/b.md" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false, inferred: true }] });
+  const store = createGraphViewStore(model);
+  expect(renderToStaticMarkup(<GraphLegend state={store.getState()} />)).toContain("Inferred links are amber");
+  expect(renderToStaticMarkup(<GraphInspector node={model.nodes[0]!} model={model} open={() => {}} />)).toContain("wiki_link, inferred");
+  const filter = renderToStaticMarkup(<GraphFilterPanel state={store.getState()} store={store} />);
+  expect(filter).toContain("Show inferred links");
+  expect(filter).toContain("checked");
+});
+
 test("chain and unlinked lists are capped with counts", () => {
   const nodes = Array.from({ length: 162 }, (_, i) => ({ id: `n${i}`, label: `Node ${i}`, relPath: `notes/n${i}.md`, type: "decision" }));
-  const edges = Array.from({ length: 51 }, (_, i) => ({ source: `n${i * 2}`, target: `n${i * 2 + 1}`, relation: "supersedes", fromFrontmatter: true }));
+  const edges = Array.from({ length: 51 }, (_, i) => ({ source: `n${i * 2}`, target: `n${i * 2 + 1}`, relation: "supersedes", fromFrontmatter: true, inferred: false }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
@@ -18,7 +28,7 @@ test("chain and unlinked lists are capped with counts", () => {
 
 test("search narrows chains before the cap so an older match stays reachable", () => {
   const nodes = Array.from({ length: 120 }, (_, i) => ({ id: `n${String(i).padStart(3, "0")}`, label: i === 0 ? "Wanted" : `Node ${i}`, relPath: `notes/n${String(i).padStart(3, "0")}.md`, type: "decision" }));
-  const edges = Array.from({ length: 60 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true }));
+  const edges = Array.from({ length: 60 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true, inferred: false }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("Wanted");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
@@ -28,7 +38,7 @@ test("search narrows chains before the cap so an older match stays reachable", (
 
 test("an exact search match outranks more than 50 substring-matching chains", () => {
   const nodes = Array.from({ length: 600 }, (_, i) => ({ id: `n${String(i).padStart(3, "0")}`, label: `Note ${i}`, relPath: `notes/n${i}.md`, type: "decision" }));
-  const edges = Array.from({ length: 300 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true }));
+  const edges = Array.from({ length: 300 }, (_, i) => ({ source: nodes[i * 2 + 1]!.id, target: nodes[i * 2]!.id, relation: "supersedes", fromFrontmatter: true, inferred: false }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("Note 4");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes search={state.search} focus={() => {}} open={() => {}} />);
@@ -58,7 +68,7 @@ test("search hides unrelated unlinked decisions", () => {
 
 test("long chains cap members and show visible matches first", () => {
   const nodes = Array.from({ length: 60 }, (_, i) => ({ id: `n${String(i).padStart(2, "0")}`, label: i === 59 ? "Wanted" : `Node ${i}`, relPath: `notes/n${i}.md`, type: "decision" }));
-  const edges = nodes.slice(1).map((node, i) => ({ source: nodes[i]!.id, target: node.id, relation: "supersedes", fromFrontmatter: true }));
+  const edges = nodes.slice(1).map((node, i) => ({ source: nodes[i]!.id, target: node.id, relation: "supersedes", fromFrontmatter: true, inferred: false }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("Wanted");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
@@ -69,7 +79,7 @@ test("long chains cap members and show visible matches first", () => {
 
 test("search-hidden members remain in the chain and are counted", () => {
   const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision", domain: id === "a" ? "x" : "y" }));
-  const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: source!, target: target!, relation: "supersedes", fromFrontmatter: true }));
+  const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: source!, target: target!, relation: "supersedes", fromFrontmatter: true, inferred: false }));
   const store = createGraphViewStore(buildGraphModel({ nodes, edges })); store.setMode("chains"); store.setSearch("A");
   const state = store.getState();
   const markup = renderToStaticMarkup(<GraphChainsPanel model={store.model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes focus={() => {}} open={() => {}} />);
@@ -87,7 +97,7 @@ test("search-hidden members remain in the chain and are counted", () => {
 const model = buildGraphModel({ nodes: [
   { id: "a", label: "Alpha", relPath: "notes/a.md", type: "insight", domain: "research" },
   { id: "b", label: "Beta", relPath: "notes/b.md", type: "decision", domain: "teaching" },
-], edges: [{ source: "a", target: "b", relation: "supports", fromFrontmatter: true }], communities: { a: 1, b: 2 } });
+], edges: [{ source: "a", target: "b", relation: "supports", fromFrontmatter: true, inferred: false }], communities: { a: 1, b: 2 } });
 
 test("facet filters and search use the derived graph", () => {
   const store = createGraphViewStore(model);

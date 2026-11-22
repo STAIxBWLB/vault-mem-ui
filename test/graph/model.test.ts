@@ -18,17 +18,25 @@ const INPUT: GraphInput = {
     { id: "projects", label: "projects", relPath: "notes/projects.md", type: "moc", domain: "projects" },
   ],
   edges: [
-    { source: "a-note", target: "projects", relation: "topics", fromFrontmatter: true },
-    { source: "a-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false },
-    { source: "b-note", target: "missing-target", relation: "wiki_link", fromFrontmatter: false },
+    { source: "a-note", target: "projects", relation: "topics", fromFrontmatter: true, inferred: false },
+    { source: "a-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+    { source: "b-note", target: "missing-target", relation: "wiki_link", fromFrontmatter: false, inferred: false },
   ],
 };
 
 describe("buildGraphModel", () => {
+  it("merges duplicate links with extracted taking precedence in either order", () => {
+    const edge = { source: "a-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false, inferred: false };
+    for (const order of [[true, false], [false, true], [true, true]]) {
+      const model = buildGraphModel({ nodes: INPUT.nodes, edges: order.map((inferred) => ({ ...edge, inferred })) });
+      expect(model.edges).toHaveLength(1);
+      expect(model.edges[0]!.inferred).toBe(order.every(Boolean));
+    }
+  });
   it("keeps relations and their frontmatter flag", () => {
     const model = buildGraphModel(INPUT, 0);
-    expect(model.edges.find((e) => e.source === "a-note" && e.target === "projects")).toMatchObject({ relation: "topics", fromFrontmatter: true });
-    expect(model.edges.find((e) => e.source === "a-note" && e.target === "b-note")).toMatchObject({ relation: "wiki_link", fromFrontmatter: false });
+    expect(model.edges.find((e) => e.source === "a-note" && e.target === "projects")).toMatchObject({ relation: "topics", fromFrontmatter: true, inferred: false });
+    expect(model.edges.find((e) => e.source === "a-note" && e.target === "b-note")).toMatchObject({ relation: "wiki_link", fromFrontmatter: false, inferred: false });
     expect(model.builtAt).toBe(0);
   });
 
@@ -54,8 +62,8 @@ describe("buildGraphModel", () => {
       nodes: [...INPUT.nodes, { id: "a-note", label: "dup", relPath: "notes/dup.md" }],
       edges: [
         ...INPUT.edges,
-        { source: "a-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false },
-        { source: "a-note", target: "a-note", relation: "wiki_link", fromFrontmatter: false },
+        { source: "a-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+        { source: "a-note", target: "a-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
       ],
     });
     expect(model.edges.filter((e) => e.source === "a-note" && e.target === "b-note")).toHaveLength(1);
@@ -119,10 +127,10 @@ describe("node and edge origin", () => {
       { id: "plan", label: "plan", relPath: "projects/plan.md", origin: "workspace" },
     ],
     edges: [
-      { source: "kg-note", target: "weekly-report", relation: "source_ref", fromFrontmatter: true },
-      { source: "weekly-report", target: "kg-note", relation: "wiki_link", fromFrontmatter: false },
-      { source: "weekly-report", target: "nowhere", relation: "wiki_link", fromFrontmatter: false },
-      { source: "plan", target: "weekly-report", relation: "wiki_link", fromFrontmatter: false },
+      { source: "kg-note", target: "weekly-report", relation: "source_ref", fromFrontmatter: true, inferred: false },
+      { source: "weekly-report", target: "kg-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+      { source: "weekly-report", target: "nowhere", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+      { source: "plan", target: "weekly-report", relation: "wiki_link", fromFrontmatter: false, inferred: false },
     ],
   };
 
@@ -158,8 +166,8 @@ describe("focusSubgraph / buildAdjacency", () => {
       nodes: [...INPUT.nodes, ...["c-note", "d-note", "far"].map((id) => ({ id, label: id, relPath: `notes/${id}.md` }))],
       edges: [
         ...INPUT.edges,
-        { source: "c-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false },
-        { source: "d-note", target: "c-note", relation: "wiki_link", fromFrontmatter: false },
+        { source: "c-note", target: "b-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
+        { source: "d-note", target: "c-note", relation: "wiki_link", fromFrontmatter: false, inferred: false },
       ],
     });
     const sub = focusSubgraph(model, "a-note", 2);
@@ -217,7 +225,7 @@ describe("pathless input nodes stay ghosts downstream", () => {
       { id: "real", label: "real", relPath: "notes/real.md", type: "decision", date: "2026-01-01" },
       { id: "ghost", label: "ghost", relPath: null, type: "decision", date: "2026-02-01" },
     ],
-    edges: [{ source: "real", target: "ghost", relation: "supersedes", fromFrontmatter: true }],
+    edges: [{ source: "real", target: "ghost", relation: "supersedes", fromFrontmatter: true, inferred: false }],
   };
   it("is hidden by showUnresolved=false and kept out of decision chains and orphans", async () => {
     const { deriveGraphView } = await import("../../src/graph/derive");
@@ -226,7 +234,7 @@ describe("pathless input nodes stay ghosts downstream", () => {
     const model = buildGraphModel(input);
     const view = deriveGraphView({
       model,
-      profile: { domains: [], origins: [], types: [], relations: [], community: null, showUnresolved: false, showGenerated: true, minVisibleNeighbors: 0 },
+      profile: { domains: [], origins: [], types: [], relations: [], community: null, showUnresolved: false, showGenerated: true, showInferred: true, minVisibleNeighbors: 0 },
       generatedPatterns: [], mode: "global", focusNodeId: null, localDepth: 2, localDirection: "both", search: "", searchAsFilter: false,
     });
     expect([...view.visibleNodeIds]).toEqual(["real"]);

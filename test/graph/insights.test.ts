@@ -27,7 +27,7 @@ function node(id: string, over: Partial<GraphNode> = {}): GraphNode {
 }
 
 function edge(source: string, target: string): GraphEdge {
-  return { source, target, relation: "wiki_link", fromFrontmatter: false, origin: "workspace" };
+  return { source, target, relation: "wiki_link", fromFrontmatter: false, inferred: false, origin: "workspace" };
 }
 
 /** Build a model and fill in each node's degree from the edge list. */

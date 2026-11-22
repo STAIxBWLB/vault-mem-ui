@@ -28,7 +28,7 @@ function node(over: Partial<GraphNode> & { id: string }): GraphNode {
 }
 
 function edge(source: string, target: string, relation = "wiki_link"): GraphEdge {
-  return { source, target, relation, fromFrontmatter: relation !== "wiki_link", origin: "workspace" };
+  return { source, target, relation, fromFrontmatter: relation !== "wiki_link", inferred: false, origin: "workspace" };
 }
 
 function model(nodes: GraphNode[], edges: GraphEdge[]): GraphModel {
@@ -44,6 +44,7 @@ function profile(over: Partial<GraphFilterProfile> = {}): GraphFilterProfile {
     community: null,
     showUnresolved: false,
     showGenerated: false,
+    showInferred: true,
     minVisibleNeighbors: 0,
     ...over,
   };
@@ -69,6 +70,16 @@ function derive(
 }
 
 const ids = (m: GraphModel) => m.nodes.map((n) => n.id).sort();
+
+describe("inferred link visibility", () => {
+  it("includes inferred links by default and excludes them when the filter is off", () => {
+    const graph = model([node({ id: "a" }), node({ id: "b" }), node({ id: "c" })], [edge("a", "b"), { ...edge("b", "c"), inferred: true }]);
+    expect(derive(graph, profile()).visibleModel.edges).toHaveLength(2);
+    const filtered = derive(graph, profile({ showInferred: false }));
+    expect(filtered.visibleModel.edges.map((item) => [item.source, item.target])).toEqual([["a", "b"]]);
+    expect(filtered.visibleNodeIds).toEqual(new Set(["a", "b", "c"]));
+  });
+});
 
 describe("deriveGraphView — node facets", () => {
   it("keeps untyped notes visible by default", () => {

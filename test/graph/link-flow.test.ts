@@ -82,7 +82,7 @@ test("a link is previewed, confirmed, and then the graph is read from its first 
   expect(reload).toMatchObject({ panel: "graph" });
   expect(reload.after).toBeUndefined();
   expect(host.calls.snapshot.at(-1)).toMatchObject({ panel: "graph", page: "edge-page" });
-  expect((store.getState().reply?.graph as GraphInput).edges).toEqual([{ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: true }]);
+  expect((store.getState().reply?.graph as GraphInput).edges).toEqual([{ source: "alpha", target: "beta", relation: "supports", fromFrontmatter: true, inferred: false }]);
 
   // With the write finished, the panel is back on the cursor path for the next poll.
   await store.refresh();

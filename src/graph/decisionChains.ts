@@ -31,35 +31,22 @@ function orderChain(nodes: GraphNode[], forward: Map<string, Set<string>>): Grap
   const members = new Map(nodes.map((node) => [node.id, node]));
   const indegree = new Map(nodes.map((node) => [node.id, 0]));
   for (const node of nodes) for (const next of forward.get(node.id) ?? []) if (members.has(next)) indegree.set(next, indegree.get(next)! + 1);
-  const heap: GraphNode[] = [];
-  const push = (node: GraphNode) => {
-    heap.push(node); let index = heap.length - 1;
-    while (index > 0) { const parent = Math.floor((index - 1) / 2); if (compareByDate(heap[parent]!, node) <= 0) break; heap[index] = heap[parent]!; index = parent; }
-    heap[index] = node;
+  // The graph is capped at 10,000 nodes. Keep ready nodes in reverse order so removal is a simple pop.
+  const ready: GraphNode[] = [];
+  const enqueue = (node: GraphNode) => {
+    let low = 0, high = ready.length;
+    while (low < high) { const mid = Math.floor((low + high) / 2); if (compareByDate(ready[mid]!, node) > 0) low = mid + 1; else high = mid; }
+    ready.splice(low, 0, node);
   };
-  const pop = (): GraphNode => {
-    const first = heap[0]!, last = heap.pop()!;
-    if (heap.length) {
-      let index = 0;
-      while (index * 2 + 1 < heap.length) {
-        let child = index * 2 + 1;
-        if (child + 1 < heap.length && compareByDate(heap[child + 1]!, heap[child]!) < 0) child++;
-        if (compareByDate(last, heap[child]!) <= 0) break;
-        heap[index] = heap[child]!; index = child;
-      }
-      heap[index] = last;
-    }
-    return first;
-  };
-  for (const node of nodes) if (indegree.get(node.id) === 0) push(node);
+  for (const node of nodes) if (indegree.get(node.id) === 0) enqueue(node);
   const ordered: GraphNode[] = [];
-  while (heap.length) {
-    const node = pop(); ordered.push(node); indegree.delete(node.id);
+  while (ready.length) {
+    const node = ready.pop()!; ordered.push(node); indegree.delete(node.id);
     for (const next of forward.get(node.id) ?? []) {
       const degree = indegree.get(next);
       if (degree === undefined) continue;
       indegree.set(next, degree - 1);
-      if (degree === 1) push(members.get(next)!);
+      if (degree === 1) enqueue(members.get(next)!);
     }
   }
   return ordered.concat([...indegree.keys()].map((id) => members.get(id)!).sort(compareByDate));
