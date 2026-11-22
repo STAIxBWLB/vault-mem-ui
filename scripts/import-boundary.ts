@@ -37,10 +37,10 @@ function peel(node: ts.Expression): ts.Expression {
 function unsafeOwner(node: ts.Node, names: ReadonlySet<string>): boolean {
   if (ts.isIdentifier(node)) {
     if (!names.has(node.text) || (ts.isPropertyAccessExpression(node.parent) && node.parent.name === node)) return false;
-    if (ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
+    if (names === LOADER_OWNERS && ts.isPropertyAssignment(node.parent) && node.parent.name === node) {
       let container: ts.Node = node.parent.parent;
       let target: ts.Node = container;
-      while (ts.isObjectLiteralExpression(container) || ts.isArrayLiteralExpression(container) || ts.isPropertyAssignment(container) || ts.isParenthesizedExpression(container)) { target = container; container = container.parent; }
+      while (ts.isObjectLiteralExpression(container) || ts.isArrayLiteralExpression(container) || ts.isPropertyAssignment(container) || ts.isParenthesizedExpression(container) || ts.isSpreadElement(container) || ts.isAsExpression(container) || ts.isSatisfiesExpression(container) || ts.isNonNullExpression(container) || ts.isTypeAssertionExpression(container)) { target = container; container = container.parent; }
       const assignment = ts.isBinaryExpression(container) && container.operatorToken.kind === ts.SyntaxKind.EqualsToken && container.left === target;
       const loop = (ts.isForOfStatement(container) || ts.isForInStatement(container)) && container.initializer === target;
       if (!assignment && !loop) return false;

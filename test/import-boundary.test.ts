@@ -255,6 +255,8 @@ test("parameter defaults check global destructuring without refusing plain objec
   }
   for (const source of ['const o = { process: 2, module: 1 }', 'const o = { "process": 1 }']) expect(boundaryViolations(source, "src/client/probe.ts")).toEqual([]);
   for (const source of ['let p; for ({ process: p } of [globalThis]) p["getBuiltin" + "Module"]("node:fs");', 'let p; for ({ process: p } in globalThis) {}', 'let p; for ([{ process: p }] of [[globalThis]]) {}']) expect(boundaryViolations(source, "src/client/probe.ts")).not.toEqual([]);
+  for (const source of ['let p; [...[{ process: p }]] = [globalThis];', 'let p; for ([...[{ process: p }]] of [[globalThis]]) {}', 'let p; [{ process: p } as any] = [globalThis];']) expect(boundaryViolations(source, "src/client/probe.ts")).not.toEqual([]);
+  expect(boundaryViolations('const o = { window: 1 }', "src/plugin/assets.ts")).not.toEqual([]);
 });
 
 test("unknown computed keys on known global and loader objects are refused throughout src", () => {
