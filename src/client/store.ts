@@ -68,10 +68,17 @@ export function createStore(host: Host, options: StoreOptions = {}): ClientStore
   const acceptSnapshot = async (reply: SnapshotReply, seq: number, panel: string, params: Record<string, string>) => {
     if (seq !== asked) return;
     const stats = state.reply?.graphStats as { cursor?: unknown; vault?: unknown; revision?: unknown } | undefined;
-    if (panel === "graph" && state.reply?.graph && reply.schema === 1 && typeof reply.cursor === "number" && reply.cursor === stats?.cursor && reply.vault === stats.vault && reply.revision === stats.revision) return;
+    if (panel === "graph" && state.reply?.graph && stats && reply.schema === 1 && reply.kind === "nodes" && reply.offset === 0 && typeof reply.cursor === "number" && Number.isSafeInteger(reply.cursor) && reply.cursor >= 0 && reply.vault === stats.vault && reply.revision === stats.revision) {
+      if (reply.cursor !== stats.cursor) set({ reply: { ...state.reply, graphStats: { ...stats, cursor: reply.cursor } }, phase: "ready", error: undefined });
+      else if (state.phase !== "ready" || state.error) set({ phase: "ready", error: undefined });
+      return;
+    }
     const assembled = panel === "graph" ? await assembleGraphPages((input) => host.snapshot(input), reply, params, () => seq === asked) : reply;
     if (seq !== asked) return;
-    if (assembled.changed === false && state.reply) return;
+    if (assembled.changed === false && state.reply) {
+      if (state.phase !== "ready" || state.error) set({ phase: "ready", error: undefined });
+      return;
+    }
     set({ reply: assembled, phase: "ready", error: undefined });
   };
   const own = (write: WriteState) => {
