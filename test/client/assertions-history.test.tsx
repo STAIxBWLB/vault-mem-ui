@@ -306,6 +306,28 @@ test("history: a refusal shows only the provider's own sentence, and a coverage 
   expect(container.textContent).not.toContain("No history");
 });
 
+test("history: a refusal caused by a carried cursor offers a way back to the first page", () => {
+  const navigations: unknown[] = [];
+  const refusal = { vault: "work", path: "notes/a.md", history: null, changes: null, error: "cursor c1 is not reachable from the vault HEAD; reload the history" };
+  mount(
+    <HistoryView
+      reply={refusal}
+      params={{ path: "notes/a.md", cursor: "c1", changesCursor: "ch9", from: older.revision, to: newer.revision }}
+      navigate={navigate(navigations)}
+      beginWrite={() => {}}
+    />,
+  );
+  expect(container.querySelector(".vmem-notice-err")?.textContent).toContain("not reachable from the vault HEAD");
+  click(button("Start over")!);
+  // A clean first page: the refused cursors, the pair and the picks all go with them.
+  expect(navigations.at(-1)).toEqual({ panel: "history", params: { vault: "work", path: "notes/a.md" } });
+
+  // Nothing carried, nothing to drop: the notice is the whole answer.
+  act(() => root.render(<HistoryView reply={refusal} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />));
+  expect(button("Start over")).toBeUndefined();
+  expect(container.querySelector(".vmem-notice-err")?.textContent).toContain("not reachable from the vault HEAD");
+});
+
 test("history: the changes between two revisions, paged, with deleted notes shown but not opened", () => {
   const navigations: unknown[] = [];
   const changes = {

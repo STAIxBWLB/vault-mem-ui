@@ -70,8 +70,23 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
     return <Empty title="No note selected" hint="Open a note, then choose History on that note." />;
   }
   // A refusal (unknown vault, a cursor the provider no longer knows, a half pair) answers no history at all, and the
-  // refusal already names its cause and next step.
-  if (error && !reply.history) return <Notice tone="err">{error}</Notice>;
+  // refusal already names its cause and next step. A carried cursor is the one refusal the panel can undo by itself:
+  // the next reload or poll lands on it again, so the way back to a clean first page is offered here.
+  if (error && !reply.history) {
+    const stuck = str(params.cursor) || str(params.changesCursor);
+    return (
+      <>
+        <Notice tone="err">{error}</Notice>
+        {stuck ? (
+          <div className="vmem-bar">
+            <button type="button" className="vmem-button" onClick={() => nav({})}>
+              Start over
+            </button>
+          </div>
+        ) : null}
+      </>
+    );
+  }
   return (
     <>
       <h1>History</h1>
