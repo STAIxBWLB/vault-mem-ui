@@ -109,6 +109,21 @@ async function mount(reply: Record<string, unknown>, navigate: (p: string, q?: R
 const flush = () => act(async () => { await new Promise((r) => setTimeout(r, 0)); });
 
 describe("GraphPanel", () => {
+  test("search updates which chains are listed after the panel is mounted", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const nodes = ["alpha", "beta", "omega", "zeta"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, type: "decision" }));
+    const edges = [["alpha", "beta"], ["omega", "zeta"]].map(([source, target]) => ({ source, target, relation: "supersedes", fromFrontmatter: true }));
+    await mount({ graph: { nodes, edges } });
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
+    const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onChange(event: { currentTarget: HTMLInputElement }): void }>)[propsKey]!;
+    await act(async () => { input.value = "alpha"; props.onChange({ currentTarget: input }); });
+    const panel = container.querySelector('[aria-label="Decision chains"]')!;
+    expect(panel.textContent).toContain("Focus chain: alpha");
+    expect(panel.textContent).not.toContain("Focus chain: omega");
+  });
   test("warns when the provider omitted unresolved links at its size limit", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
@@ -118,7 +133,7 @@ describe("GraphPanel", () => {
   test("chain search keeps the full chain and out-of-search note action", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
-    const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id === "a" ? "Alpha" : id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision" }));
+    const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id === "a" ? "Alpha" : id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision", domain: id === "a" ? "x" : "y" }));
     const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source, target, relation: "supersedes", fromFrontmatter: true }));
     await mount({ graph: { nodes, edges } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
@@ -130,6 +145,11 @@ describe("GraphPanel", () => {
     await act(async () => { input.value = "Alpha"; props.onChange({ currentTarget: input }); });
     const panel = container.querySelector('[aria-label="Decision chains"]')!;
     expect(panel.textContent).toContain("2 of 4 visible");
+    expect(panel.textContent).toContain("Open D");
+    const domain = [...container.querySelectorAll("fieldset")].find((element) => element.querySelector("legend")?.textContent === "Domains")!;
+    const option = [...domain.querySelectorAll("label")].find((label) => label.textContent?.includes("x ("))!.querySelector("input")!;
+    await act(async () => option.click());
+    expect(panel.textContent).toContain("1 of 4 visible");
     expect(panel.textContent).toContain("Open D");
   });
   test("provider graphs without supersedes edges explain the missing chain data", async () => {

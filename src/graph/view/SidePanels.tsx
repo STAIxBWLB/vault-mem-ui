@@ -3,7 +3,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { findBridges, findHiddenLinks, findOrphans, findSurprisingConnections } from "../insights";
 import { buildDecisionChains } from "../decisionChains";
 import type { GraphModel, GraphNode } from "../model";
-import { GRAPH_SEARCH_LIMIT, rankGraphSearch } from "../search";
+import { GRAPH_SEARCH_LIMIT, graphSearchRank, rankGraphSearch } from "../search";
 import { communityColor, refreshGraphTheme } from "../style";
 import type { GraphFilterProfile } from "../types";
 import { LARGE_GRAPH_EDGES } from "../layout/protocol";
@@ -12,12 +12,19 @@ import { OPEN_PROFILE } from "./state";
 
 /** Chain groups use the existing maru-derived decisionChains.ts model. */
 const CHAIN_LIST_LIMIT = 50;
-export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleIds, chainFocusIds, hasSupersedes, focus, open }: { model: GraphModel; visibleIds: Set<string>; chainFocusIds: Set<string>; hasSupersedes: boolean; focus(ids: string[]): void; open(id: string): void }) {
+export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleIds, chainFocusIds, hasSupersedes, search = "", focus, open }: { model: GraphModel; visibleIds: Set<string>; chainFocusIds: Set<string>; hasSupersedes: boolean; search?: string; focus(ids: string[]): void; open(id: string): void }) {
   const layout = useMemo(() => buildDecisionChains(model), [model]);
-  const shown = useMemo(() => ({
-    chains: layout.chains.filter((chain) => chain.nodes.some((node) => visibleIds.has(node.id))),
-    isolated: layout.isolated.filter((node) => visibleIds.has(node.id)),
-  }), [layout, visibleIds]);
+  const shown = useMemo(() => {
+    let chains = layout.chains.filter((chain) => chain.nodes.some((node) => visibleIds.has(node.id)));
+    let isolated = layout.isolated.filter((node) => visibleIds.has(node.id));
+    if (search.trim()) {
+      const rank = (node: GraphNode) => visibleIds.has(node.id) ? graphSearchRank(node, search) ?? Infinity : Infinity;
+      const best = (nodes: GraphNode[]) => nodes.reduce((value, node) => Math.min(value, rank(node)), Infinity);
+      chains = chains.map((chain) => ({ chain, rank: best(chain.nodes) })).sort((a, b) => a.rank - b.rank).map((item) => item.chain);
+      isolated = isolated.map((node) => ({ node, rank: rank(node) })).sort((a, b) => a.rank - b.rank).map((item) => item.node);
+    }
+    return { chains, isolated };
+  }, [layout, visibleIds, search]);
   return <section className="vmem-card vmem-graph-panel" aria-label="Decision chains">
     <h2 className="vmem-card-title">Decision chains</h2>
     {!hasSupersedes && <p>The provider's graph does not carry supersedes edges yet (STAIxBWLB/vault-mem#294). Chains will appear when the provider supplies them; nothing to do now.</p>}
@@ -28,7 +35,7 @@ export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleI
       const selected = visible.length > 0 && visible.length === chainFocusIds.size && visible.every((id) => chainFocusIds.has(id));
       const label = chain.nodes.slice(0, 3).map((node) => node.label).join(" → ");
       const members = chain.nodes.length > CHAIN_LIST_LIMIT ? [...chain.nodes.filter((node) => visibleIds.has(node.id)), ...chain.nodes.filter((node) => !visibleIds.has(node.id))] : chain.nodes;
-      return <li key={JSON.stringify(ids)}><button type="button" className="vmem-button" disabled={!visible.length} aria-pressed={selected} onClick={() => focus(visible)}>Focus chain: {label}{ids.length > 3 ? " ..." : ""}</button>
+      return <li key={JSON.stringify(ids)}><button type="button" className="vmem-button" aria-pressed={selected} onClick={() => focus(visible)}>Focus chain: {label}{ids.length > 3 ? " ..." : ""}</button>
         {visible.length !== ids.length && <span> {visible.length} of {ids.length} visible</span>}
         <ul>{members.slice(0, CHAIN_LIST_LIMIT).map((node) => <li key={node.id}><button type="button" className="vmem-button" disabled={!node.relPath} onClick={() => open(node.id)}>Open {node.label}</button>{node.date ? ` (${node.date})` : ""}</li>)}</ul>
         {ids.length > CHAIN_LIST_LIMIT && <p>Showing {CHAIN_LIST_LIMIT} of {ids.length} decisions, visible first.</p>}

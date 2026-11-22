@@ -239,7 +239,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         onKeyDown={onKey}
       />
       <aside className="vmem-graph-sidebar" aria-label="Graph details">
-        {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} focus={focusChain} open={openNote} />}
+        {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} search={state.search} focus={focusChain} open={openNote} />}
         <GraphFilterPanel state={state} store={store} />
         <GraphLegend state={state} themeKey={themeKey} />
         <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />

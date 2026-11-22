@@ -12,6 +12,18 @@ export interface GraphSearchResult {
 
 export const GRAPH_SEARCH_LIMIT = 20;
 
+/** The same match category used by ranked search, or null when the node does not match. */
+export function graphSearchRank(node: { label: string; relPath: string | null }, query: string): number | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const label = node.label.toLowerCase();
+  if (label === q) return 0;
+  if (label.startsWith(q)) return 1;
+  if (label.includes(q)) return 2;
+  if (node.relPath && node.relPath.toLowerCase().includes(q)) return 3;
+  return null;
+}
+
 export function graphNodeMatchesSearch(
   node: { label: string; relPath: string | null },
   query: string,
@@ -31,12 +43,7 @@ export function rankGraphSearch(
   if (!q) return [];
   const scored: { node: GraphSearchResult; rank: number }[] = [];
   for (const node of nodes) {
-    const label = node.label.toLowerCase();
-    let rank: number | null = null;
-    if (label === q) rank = 0;
-    else if (label.startsWith(q)) rank = 1;
-    else if (label.includes(q)) rank = 2;
-    else if (node.relPath && node.relPath.toLowerCase().includes(q)) rank = 3;
+    const rank = graphSearchRank(node, q);
     if (rank == null) continue;
     scored.push({ node: { id: node.id, label: node.label, relPath: node.relPath }, rank });
   }
