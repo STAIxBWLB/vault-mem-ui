@@ -30,10 +30,11 @@ export function ProposalsView({ reply, params, navigate, beginWrite }: ViewProps
     {id && <section className="vmem-card" aria-label="Selected proposal">
       <h2 className="vmem-card-title">Proposal {id}</h2>
       <p>{str(selected.path)} · {selectedState}</p>
+      {selectedState === "apply_unknown" && <p>Apply outcome is unknown. Reconcile before another decision: <code>vmem proposal reconcile {vault} {id}</code>.</p>}
       {str(selected.agentLabelUnverified) && <p>Agent label (unverified): {str(selected.agentLabelUnverified)}</p>}
       {str(selected.decisionReason) && <p>Decision reason: {str(selected.decisionReason)}</p>}
       <pre className="vmem-body">{str(selected.content)}</pre>
-      {selected.truncated === true && <p>Proposal content is truncated. Inspect the full proposal with the vmem CLI before deciding.</p>}
+      {selected.truncated === true && <p>Proposal content is truncated. Read the rest before deciding: <code>vmem proposal show {vault} {id}{typeof selected.nextOffset === "number" ? ` --offset ${selected.nextOffset}` : ""}</code>.</p>}
       {selectedState === "pending" && <>
         <button type="button" className="vmem-button" onClick={() => beginWrite({ action: "proposal-apply", vault, id })}>Preview apply</button>
         <form key={`${vault}:${id}`} className="vmem-form" onSubmit={(event) => {

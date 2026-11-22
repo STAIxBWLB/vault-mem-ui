@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { registerConsoleConformance } from "@staix/agent-console/conformance";
 import { createVaultMcp } from "@staix/vault-mem";
 import { plugin } from "../src/plugin/index.ts";
+import { expect, test } from "bun:test";
 
 // vmem refuses an input directory reached through a symlink, and `mkdtempSync` on macOS answers one
 // (`/var` is `/private/var`), so the seed is written under the resolved path.
@@ -40,6 +41,30 @@ for (const args of [
 }
 process.env.VMEM_HOME = home;
 process.env.AMEM_HOME = memory;
+
+test("proposal snapshots list, select by id and continue by page cursor", async () => {
+  const ids: string[] = [];
+  const note = await writer.handlers.vmem_read!({ path: "notes/a.md", vault: "test" }) as { sha256: string };
+  for (const stem of ["proposed-a", "proposed-b"]) {
+    const result = await writer.handlers.vmem_proposal_submit!({ vault: "test", operation: {
+      op: "patch", path: "notes/a.md", expectedSha: note.sha256, edits: [{ oldString: "Synthetic content.", newString: `Synthetic ${stem}.` }],
+    } }) as { stored?: boolean; id: string; issues?: unknown };
+    if (result.stored !== true) throw new Error(`Synthetic proposal submission failed: ${JSON.stringify(result)}`);
+    expect(result.stored).toBe(true);
+    ids.push(result.id);
+  }
+  const provider = await plugin.open({ home, log: () => {} });
+  try {
+    const first = await provider.snapshot({ panel: "proposals", after: 0, vault: "test", state: "pending", limit: 1 });
+    const page = first.page as { items: { id: string }[]; nextCursor: string | null };
+    expect(page.items).toHaveLength(1);
+    expect(ids).toContain(page.items[0]!.id);
+    expect(page.nextCursor).toBeTruthy();
+    const next = await provider.snapshot({ panel: "proposals", after: 0, vault: "test", state: "pending", limit: 1, page: page.nextCursor!, id: page.items[0]!.id });
+    expect((next.page as { items: { id: string }[] }).items[0]!.id).not.toBe(page.items[0]!.id);
+    expect(next.selected).toMatchObject({ id: page.items[0]!.id, vault: "test", state: "pending" });
+  } finally { await provider.close?.(); }
+});
 
 registerConsoleConformance(plugin, {
   home,
