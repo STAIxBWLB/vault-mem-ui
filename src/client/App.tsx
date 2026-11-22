@@ -9,6 +9,8 @@ import { Notice, WriteDialog } from "./components.tsx";
 import type { ActionInput, Host } from "./host.ts";
 import { PANEL_IDS, type ThemePref } from "./prefs.ts";
 import { createStore, type ClientStore, type ClientState } from "./store.ts";
+import { AssertionsView } from "./views/assertions.tsx";
+import { HistoryView } from "./views/history.tsx";
 import { LintView } from "./views/lint.tsx";
 import { LogView } from "./views/log.tsx";
 import { NoteView } from "./views/note.tsx";
@@ -29,6 +31,8 @@ const TITLES: Record<string, string> = {
   graph: "Graph",
   settings: "Settings",
   proposals: "Proposals",
+  assertions: "Assertions",
+  history: "History",
 };
 
 export const VIEWS = {
@@ -41,6 +45,8 @@ export const VIEWS = {
   graph: GraphPanel,
   settings: SettingsView,
   proposals: ProposalsView,
+  assertions: AssertionsView,
+  history: HistoryView,
 };
 
 export type Navigate = (panel: string, params?: Record<string, string>) => void;

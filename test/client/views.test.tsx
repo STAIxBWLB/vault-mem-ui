@@ -70,6 +70,60 @@ const replies: Record<string, Record<string, unknown>> = {
     cursor: "42",
     more: true,
   },
+  assertions: {
+    vault: "work",
+    result: {
+      schemaVersion: 1,
+      basis: "assertion_journal",
+      vault: "work",
+      at: "2026-01-02T07:00:00Z",
+      asOf: { requested: "2026-01-01", cutoff: "2026-01-01T00:00:00Z", cutoffInclusive: true },
+      pin: [],
+      coverage: {},
+      items: [
+        {
+          id: "a1",
+          rev: 1,
+          op: "assert",
+          subject: "notes/a.md",
+          relation: "status",
+          value: "current",
+          hash: "h1",
+          recordedAt: "2026-01-02T03:04:05Z",
+          subjectNote: { path: "notes/a.md", status: "present" },
+        },
+      ],
+      truncated: false,
+      continuation: "c1",
+    },
+    warnings: [{ tone: "warn", message: "1 assertion file is not committed; run `vmem sync` to share them" }],
+  },
+  history: {
+    vault: "work",
+    path: "notes/a.md",
+    history: {
+      path: "notes/a.md",
+      revisions: [
+        { revision: "cccccccccccc3333", blob: "dddddddddddd4444", bytes: 130, committedAt: "2026-01-03T03:04:05Z" },
+        { revision: "aaaaaaaaaaaa1111", blob: "bbbbbbbbbbbb2222", bytes: 120, committedAt: "2026-01-02T03:04:05Z" },
+      ],
+      scanned: 12,
+      scanLimit: 500,
+      pageLimit: 20,
+      stopReason: "history_end",
+      truncated: false,
+      skippedSymlink: 0,
+    },
+    changes: {
+      from: "aaaaaaaaaaaa1111",
+      to: "cccccccccccc3333",
+      changed: [{ path: "notes/a.md", status: "M", before: "1111aaaa2222", after: "3333bbbb4444" }],
+      total: 1,
+      truncated: false,
+      skippedDenied: 0,
+      skippedSymlink: 0,
+    },
+  },
 };
 
 describe("PanelView", () => {
@@ -105,6 +159,16 @@ describe("PanelView", () => {
     expect(log).toContain("LEARN notes/a.md");
     expect(log).toContain("Newer entries");
     expect(log).toContain("Older entries exist");
+
+    const assertions = render(state({ panel: "assertions", reply: replies.assertions! }));
+    expect(assertions).toContain("notes/a.md status current");
+    expect(assertions).toContain("not committed");
+    expect(assertions).toContain("Next page");
+
+    const history = render(state({ panel: "history", reply: replies.history!, params: { path: "notes/a.md" } }));
+    expect(history).toContain("Revision cccccccccccc");
+    expect(history).toContain("Show changes");
+    expect(history).toContain("modified · before 1111aaaa2222 · after 3333bbbb4444");
   });
 
   test("an empty reply says so instead of rendering an empty shell", () => {
@@ -113,6 +177,8 @@ describe("PanelView", () => {
     expect(render(state({ panel: "log" }))).toContain("Log is empty");
     expect(render(state({ panel: "promote" }))).toContain("No promotion candidates");
     expect(render(state({ panel: "overview", reply: { status: { vaults: [] } } }))).toContain("No vault registered");
+    expect(render(state({ panel: "assertions" }))).toContain("No assertions");
+    expect(render(state({ panel: "history" }))).toContain("No note selected");
   });
 
   test("a failing panel shows the error and keeps the navigation usable", () => {

@@ -75,8 +75,9 @@ test("the standalone command routes graph to the unavailable reply", async () =>
   const cookie = signedIn.headers.get("set-cookie")!.split(";")[0]!;
   const manifest = await (await fetch(host!.origin + "/api/manifest", { headers: { cookie } })).json() as { panels: { id: string }[] };
   expect(new Set(manifest.panels.map((p) => p.id))).toEqual(new Set(PANEL_IDS));
+  // No provider panel is left unimplemented, so the refusal is proven with an id no provider declares.
   const refused = await fetch(host!.origin + "/api/snapshot", {
-    method: "POST", headers: { cookie, origin: host!.origin, "content-type": "application/json" }, body: JSON.stringify({ panel: "assertions" }),
+    method: "POST", headers: { cookie, origin: host!.origin, "content-type": "application/json" }, body: JSON.stringify({ panel: "timeline" }),
   });
   expect(refused.status).toBe(400);
   expect(await refused.json()).toMatchObject({ error: expect.stringMatching(/unknown panel/i) });
