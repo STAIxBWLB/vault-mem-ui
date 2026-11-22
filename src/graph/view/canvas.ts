@@ -23,7 +23,7 @@ export interface SigmaLike {
   setSetting(key: string, value: unknown): unknown;
   refresh(opts?: { partialGraph?: { nodes?: string[]; edges?: string[] }; skipIndexation?: boolean; schedule?: boolean }): unknown;
   /** Whether Sigma's program index covers every node and edge right now. A scheduled full refresh (window resize,
-   *  setSetting) empties it until its frame runs, and a skipIndexation repaint throws until then. */
+   *  setSetting) empties the edge half until its frame runs, and a skipIndexation repaint throws until then. */
   hasProgramIndices(): boolean;
   kill(): void;
 }
@@ -183,8 +183,8 @@ export function mountGraphCanvas(
   // (Sigma's skipIndexation needs an explicit partialGraph; a bare refresh() always re-indexes everything).
   const everything = { nodes: model.nodes.map((n) => n.id), edges: model.edges.map((_, i) => `e${i}`) };
   const repaint = () => {
-    // A scheduled full refresh (window resize, setSetting) empties the program index until its frame runs, and
-    // skipIndexation throws on the first node then. Rebuild in the same call instead of waiting for that frame.
+    // A scheduled full refresh (window resize, setSetting) empties the edge program index until its frame runs, and
+    // skipIndexation throws on the first edge then. Rebuild in the same call instead of waiting for that frame.
     if (!sigma.hasProgramIndices()) { sigma.refresh(); return; }
     sigma.refresh({ partialGraph: everything, skipIndexation: true, schedule: true });
   };
@@ -238,9 +238,10 @@ export function mountGraphCanvas(
     refreshTheme() {
       refreshGraphTheme(container);
       // Sigma's own graph listeners repaint an attributes batch with skipIndexation; rebuild first when a
-      // scheduled full refresh left the program index empty, or those repaints throw.
+      // scheduled full refresh emptied the edge program index, or those repaints throw.
       if (!sigma.hasProgramIndices()) sigma.refresh();
-      // One pass per kind: graphology emits one event each, which Sigma rewrites into the programs itself.
+      // One pass per kind: graphology emits one each*AttributesUpdated, and Sigma's own listener already recomputes
+      // the reducers and rewrites the programs for it. A refresh() after these passes would be a third one.
       graph.updateEachNodeAttributes((node, attrs) => {
         const n = nodeById.get(node);
         return n ? { ...attrs, color: nodeColor(n, model.enriched, "neutral") } : attrs;
@@ -249,7 +250,6 @@ export function mountGraphCanvas(
         const edge = model.edges[attrs.index as number];
         return edge ? { ...attrs, color: edgeColor(edge, display) } : attrs;
       }, { attributes: ["color"] });
-      sigma.refresh();
     },
     positionOf(id) {
       if (!graph.hasNode(id)) return null;
@@ -260,23 +260,21 @@ export function mountGraphCanvas(
   };
 }
 
-/** Counts the keys of a Sigma index without materialising them (10k nodes / 100k edges in the supported size). */
-function indexSize(index: Record<string, unknown>): number {
-  let n = 0;
-  for (const key in index) { void key; n += 1; }
-  return n;
-}
-
 /**
- * Sigma 3.0.3 keeps its program index in private fields and exposes no accessor; clearEdgeIndices replaces
- * `edgeProgramIndex` with an empty object, and `process()` refills it one entry per node and edge. This is the one
- * place that reads those fields; a Sigma without them answers false, which only costs a full refresh.
+ * Sigma 3.0.3 keeps its program index in private fields and exposes no accessor. A full refresh empties it all at
+ * once (`clearEdgeIndices`, and `clearNodeIndices`, which resets the *edge* index) and `process()` refills it all at
+ * once, one entry per edge, on the frame a scheduled refresh defers. The rebuild is therefore all-or-nothing, so one
+ * key answers for the whole index in O(1): this canvas names its edges `e0..e{size-1}`, and a graph without edges
+ * needs no entry. A Sigma without the field answers false, which only costs a full refresh.
+ *
+ * `nodeProgramIndex` needs no probe: nothing in 3.0.3 empties it (only `removeNode` deletes an entry, and this canvas
+ * never removes a node), so once `process()` has run it stays complete.
  */
-function programIndicesCover(sigma: object, graph: object): boolean {
-  const s = sigma as { nodeProgramIndex?: Record<string, unknown>; edgeProgramIndex?: Record<string, unknown> };
-  const g = graph as { order?: number; size?: number };
-  if (!s.nodeProgramIndex || !s.edgeProgramIndex || g.order === undefined || g.size === undefined) return false;
-  return indexSize(s.nodeProgramIndex) === g.order && indexSize(s.edgeProgramIndex) === g.size;
+export function programIndicesCover(sigma: object, graph: object): boolean {
+  const s = sigma as { edgeProgramIndex?: Record<string, unknown> };
+  const g = graph as { size?: number };
+  if (!s.edgeProgramIndex || g.size === undefined) return false;
+  return g.size === 0 || `e${g.size - 1}` in s.edgeProgramIndex;
 }
 
 /** Real Sigma and graphology, loaded on first use so module evaluation stays WebGL- and DOM-free. */

@@ -1,14 +1,15 @@
 /**
  * Refresh accounting against the real graphology graph and a Sigma stub that records each refresh and models the
- * program index of Sigma 3.0.3: a scheduled full refresh empties it until its frame runs, and a skipIndexation
- * repaint over a node or edge without an index entry throws exactly as Sigma does. Camera-only changes do no work
- * unless LOD flips, reducer changes repaint without re-indexing, and a layout batch is one graph-wide update.
+ * program index of Sigma 3.0.3: a full refresh empties the edge half of it, process() refills that on the frame a
+ * scheduled refresh defers, the node half is never emptied, and a skipIndexation repaint over a node or edge without
+ * an index entry throws exactly as Sigma does. Camera-only changes do no work unless LOD flips, reducer changes
+ * repaint without re-indexing, and a layout batch is one graph-wide update.
  */
 
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { MultiDirectedGraph } from "graphology";
 import { buildGraphModel } from "../../../src/graph/model";
-import { mountGraphCanvas, type CanvasDeps, type GraphLike, type SigmaLike } from "../../../src/graph/view/canvas";
+import { mountGraphCanvas, programIndicesCover, type CanvasDeps, type GraphLike, type SigmaLike } from "../../../src/graph/view/canvas";
 import { LOD_EDGE_THRESHOLD } from "../../../src/graph/view/lod";
 import { createGraphViewStore } from "../../../src/graph/view/state";
 import type { GraphInput } from "../../../src/graph/types";
@@ -23,38 +24,47 @@ function harness(input: GraphInput) {
   graph.on("nodeAttributesUpdated", () => events.push("node"));
   graph.on("eachNodeAttributesUpdated", () => events.push("each"));
   graph.on("eachEdgeAttributesUpdated", () => events.push("eachEdge"));
-  // The program index Sigma refills in process(): one entry per node and edge.
-  const indexed = new Set<string>();
+  // Sigma's two program indices, kept apart because 3.0.3 empties them differently: a full refresh resets the edge
+  // index (clearEdgeIndices, and clearNodeIndices, which also resets the *edge* one) and process() refills it one edge
+  // at a time, while nodeProgramIndex is never emptied.
+  const nodeIndex = new Set<string>();
+  const edgeIndex = new Set<string>();
+  const fillEdges = () => { for (const e of graph.edges()) edgeIndex.add(e); };
   const model = buildGraphModel(input, 0);
   const sigma: SigmaLike = {
     on: () => undefined,
     getCamera: () => ({ getState: () => ({ ratio: 1 }), on: () => undefined, animate: () => undefined }),
     getNodeDisplayData: () => undefined,
-    // setSetting schedules a full refresh, which re-indexes and leaves the index empty until the next frame.
+    // setSetting schedules a full refresh: that re-indexes now and leaves the edge index empty until its frame.
     setSetting: (key, value) => { settings[key] = value; sigma.refresh({ schedule: true }); },
     refresh: (opts) => {
       refreshes.push(opts);
       if (!opts?.partialGraph) {
-        indexed.clear();
-        // An unscheduled full refresh runs process() in the same call.
-        if (!opts?.schedule) { for (const n of graph.nodes()) indexed.add(n); for (const e of graph.edges()) indexed.add(e); }
+        edgeIndex.clear();
+        // An unscheduled full refresh runs process() in the same call; a scheduled one waits for its frame.
+        if (!opts?.schedule) fillEdges();
         return;
       }
       if (!opts.skipIndexation) return;
       for (const node of opts.partialGraph.nodes ?? []) {
-        if (!indexed.has(node)) throw new Error(`Sigma: node "${node}" can't be repaint`);
+        if (!nodeIndex.has(node)) throw new Error(`Sigma: node "${node}" can't be repaint`);
       }
       for (const edge of opts.partialGraph.edges ?? []) {
-        if (!indexed.has(edge)) throw new Error(`Sigma: edge "${edge}" can't be repaint`);
+        if (!edgeIndex.has(edge)) throw new Error(`Sigma: edge "${edge}" can't be repaint`);
       }
     },
-    hasProgramIndices: () => indexed.size === graph.order + graph.size,
+    hasProgramIndices: () => nodeIndex.size === graph.order && edgeIndex.size === graph.size,
     kill: () => undefined,
   };
+  // Sigma's constructor binds these two to the graph, and they are why a theme pass needs no refresh of its own: each
+  // bulk attribute update repaints through skipIndexation. Bound here too, so a pass over an emptied index fails with
+  // Sigma's own message instead of passing quietly.
+  graph.on("eachNodeAttributesUpdated", () => { sigma.refresh({ partialGraph: { nodes: graph.nodes() }, skipIndexation: true, schedule: true }); });
+  graph.on("eachEdgeAttributesUpdated", () => { sigma.refresh({ partialGraph: { edges: graph.edges() }, skipIndexation: true, schedule: true }); });
   const deps: CanvasDeps = {
     createGraph: () => graph as unknown as GraphLike,
-    // Like Sigma's constructor: the first refresh is synchronous, so the mount starts with a filled index.
-    createSigma: () => { for (const n of graph.nodes()) indexed.add(n); for (const e of graph.edges()) indexed.add(e); return sigma; },
+    // Like Sigma's constructor: the first refresh is synchronous, so the mount starts with both indices filled.
+    createSigma: () => { for (const n of graph.nodes()) nodeIndex.add(n); fillEdges(); return sigma; },
   };
   const store = createGraphViewStore(model);
   const canvas = mountGraphCanvas({} as HTMLElement, model, store.getState(), {}, { onHover: () => {}, onClick: () => {}, onCamera: () => {} }, deps);
@@ -133,12 +143,16 @@ test("a layout batch is one graph-wide update, never one event per coordinate, a
   const h = harness(ring(200));
   const positions = new Float32Array(400).map((_, i) => i);
   h.canvas.applyPositions(positions);
+  // One graph-wide update: Sigma's own listener then repaints it once, and the canvas asks for nothing.
   expect(h.events).toEqual(["each"]);
-  expect(h.refreshes).toEqual([]);
+  expect(h.full()).toBe(0);
+  expect(h.light()).toBe(1);
   expect(h.graph.getNodeAttributes("n7")).toMatchObject({ x: 14, y: 15 });
   // The status line's iteration count changes on every batch; that must not refresh Sigma either.
   for (let i = 1; i <= 5; i += 1) h.step(() => h.store.setLayout({ kind: "running", iterations: i }));
-  expect(h.refreshes).toEqual([]);
+  expect(h.full()).toBe(0);
+  expect(h.light()).toBe(1);
+  expect(h.events).toEqual(["each"]);
 });
 
 test("non-finite coordinates in a batch leave that node where it was", () => {
@@ -147,4 +161,40 @@ test("non-finite coordinates in a batch leave that node where it was", () => {
   h.canvas.applyPositions(new Float32Array([1, 2, Number.NaN, 5, 6, 7]));
   expect(h.graph.getNodeAttributes("n1")).toMatchObject({ x: before.x, y: before.y });
   expect(h.graph.getNodeAttributes("n2")).toMatchObject({ x: 6, y: 7 });
+});
+
+test("a theme change repaints through Sigma's own attribute listeners and adds no full refresh of its own", () => {
+  const h = harness(ring(50));
+  h.canvas.refreshTheme();
+  // Sigma's each*AttributesUpdated listeners repaint with skipIndexation, so the two passes are the whole cost.
+  expect(h.events).toEqual(["each", "eachEdge"]);
+  expect(h.full()).toBe(0);
+  expect(h.light()).toBe(2);
+  expect(h.sigma.hasProgramIndices()).toBe(true);
+
+  // A scheduled refresh empties the edge index until its frame, so the guard rebuilds once before the passes.
+  h.sigma.refresh({ schedule: true });
+  expect(h.sigma.hasProgramIndices()).toBe(false);
+  const rebuilds = h.full();
+  const repaints = h.light();
+  expect(() => h.canvas.refreshTheme()).not.toThrow();
+  expect(h.full()).toBe(rebuilds + 1);
+  expect(h.light()).toBe(repaints + 2);
+  expect(h.sigma.hasProgramIndices()).toBe(true);
+});
+
+describe("programIndicesCover", () => {
+  test("judges the emptied edge index from its last key, and answers false without the field or the size", () => {
+    const sigma = (edgeProgramIndex: Record<string, unknown>) => ({ edgeProgramIndex });
+    // Filled by process(): every edge, so the last key is there.
+    expect(programIndicesCover(sigma({ e0: 0, e1: 1, e2: 2 }), { size: 3 })).toBe(true);
+    // Emptied wholesale by clearEdgeIndices, and half refilled by a partial repaint: both are not covered.
+    expect(programIndicesCover(sigma({}), { size: 3 })).toBe(false);
+    expect(programIndicesCover(sigma({ e0: 0, e1: 1 }), { size: 3 })).toBe(false);
+    // A graph without edges needs no entry, so an empty index covers it.
+    expect(programIndicesCover(sigma({}), { size: 0 })).toBe(true);
+    // A Sigma that does not expose the field, or a graph without a size, answers false and pays a full refresh.
+    expect(programIndicesCover({}, { size: 3 })).toBe(false);
+    expect(programIndicesCover(sigma({ e0: 0 }), {})).toBe(false);
+  });
 });
