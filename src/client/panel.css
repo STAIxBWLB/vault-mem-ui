@@ -372,6 +372,19 @@
   gap: var(--vmem-space-2);
 }
 
+.vmem-body {
+  margin: 0;
+  padding: var(--vmem-space-3);
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--vmem-surface);
+  border: 1px solid var(--vmem-line);
+  border-radius: var(--vmem-radius);
+  font: 13px/1.5 var(--vmem-mono);
+}
+
 .vmem-md {
   display: flex;
   flex-direction: column;

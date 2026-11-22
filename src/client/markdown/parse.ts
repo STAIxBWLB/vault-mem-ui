@@ -157,7 +157,7 @@ function parseBlocks(lines: string[], depth: number): Block[] {
       const rows: Inline[][][] = [];
       while (at < lines.length && lines[at]!.trim() && lines[at]!.includes("|")) {
         const row = splitRow(lines[at]!);
-        rows.push(align.map((_, index) => parseInline(row[index] ?? "")));
+        rows.push(row.slice(0, align.length).map((cell) => parseInline(cell)));
         at += 1;
       }
       blocks.push({ kind: "table", align, head: align.map((_, index) => parseInline(cells[index] ?? "")), rows });
@@ -330,8 +330,10 @@ function inlinePass(text: string, depth: number, links: boolean): Inline[] {
       continue;
     }
     if (char === "\n") {
-      if (/ {2,}$/.test(buffer)) {
-        buffer = buffer.replace(/ +$/, "");
+      if (buffer.endsWith("  ")) {
+        let end = buffer.length;
+        while (end > 0 && buffer[end - 1] === " ") end -= 1;
+        buffer = buffer.slice(0, end);
         flush();
         out.push({ kind: "break" });
       } else buffer += " ";

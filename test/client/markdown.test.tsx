@@ -468,6 +468,16 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
       "const destinationStart = Date.now();",
       "parseInline(destinations);",
       'if (Date.now() - destinationStart > 1000) throw new Error("unclosed destinations took " + (Date.now() - destinationStart) + " ms");',
+      'const overlapStart = Date.now();',
+      'parseInline("[a](".repeat(12000) + ")".repeat(12000));',
+      'if (Date.now() - overlapStart > 1000) throw new Error("overlapping destinations took " + (Date.now() - overlapStart) + " ms");',
+      'const breakStart = Date.now();',
+      'parseInline("a" + " ".repeat(8000) + "b\\n" + "x\\n".repeat(3000));',
+      'if (Date.now() - breakStart > 1000) throw new Error("hard break scan took " + (Date.now() - breakStart) + " ms");',
+      'const header = Array(1000).fill("x").join("|");',
+      'const separator = Array(1000).fill("---").join("|");',
+      'const table = parseMarkdown(header + "\\n" + separator + "\\n" + "|\\n".repeat(1000))[0];',
+      'if (table.kind !== "table" || table.rows.reduce((n, row) => n + row.length, 0) > 2000) throw new Error("table cell amplification");',
       'console.log("ok");',
     ].join("\n");
     const run = Bun.spawnSync([Bun.which("node")!, "--input-type=module", "-e", script]);
@@ -484,6 +494,13 @@ describe("nesting is capped, so a small note cannot overflow the stack", () => {
 });
 
 describe("a pathological note takes bounded work", () => {
+  test("short table rows are not padded to the header width", () => {
+    const header = Array(100).fill("x").join("|");
+    const separator = Array(100).fill("---").join("|");
+    const table = parseMarkdown(`${header}\n${separator}\n${"|\n".repeat(100)}`)[0];
+    expect(table?.kind).toBe("table");
+    if (table?.kind === "table") expect(table.rows.reduce((n, row) => n + row.length, 0)).toBeLessThanOrEqual(200);
+  });
   test("unterminated destinations stay literal while nested and escaped parentheses parse", () => {
     expect(parseInline("[a](".repeat(12000)).map((node) => node.kind)).toEqual(["text"]);
     expect(parseInline("[nested](https://example.test/a(b))")[0]).toMatchObject({ kind: "link", href: "https://example.test/a(b)" });
