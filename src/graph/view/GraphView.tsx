@@ -121,9 +121,15 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
   const [similar, setSimilar] = useState<{ path?: string; loading: boolean; hits: { path: string; title: string; score: number }[]; error?: string }>({ loading: false, hits: [] });
   const selected = state.selectedId ? state.derived.visibleModel.nodes.find((n) => n.id === state.selectedId) ?? null : null;
 
+  useEffect(() => { setSemanticError(null); }, [revision, model]);
+
   useEffect(() => {
     let active = true;
-    setSemanticEdges(null); setSemanticLoading(false);
+    setSemanticLoading(false);
+    if (!semanticOn || !enrichment) {
+      setSemanticEdges(null);
+      if (!enrichment) setSemanticOn(false);
+    }
     if (semanticOn && enrichment && vault && revision && graphSnapshot) {
       setSemanticError(null); setSemanticLoading(true);
       void assembleSemanticPages((input) => graphSnapshot(input), vault, revision, model.nodes.length, () => active)
@@ -151,76 +157,80 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
     setCanvasReady(false);
     setCanvasError(null);
     let cancelled = false;
-    let lastSave = 0;
-    let initialFixed: Uint8Array = new Uint8Array(0);
-    let latest: Float32Array | null = null;
-    const save = () => { if (latest) { store.savePositions(latest); lastSave = Date.now(); } };
     const host = hostRef.current;
     if (!host) return;
-    let stage: "canvas" | "layout" = "canvas";
-    (env.canvasDeps ?? loadCanvasDeps)()
-      .then((deps) => {
+    (env.canvasDeps ?? loadCanvasDeps)().then((deps) => {
+      if (cancelled) return;
+      canvasRef.current = mountGraphCanvas(host, model, store.getState(), store.cachedPositions(), {
+        onHover: (id) => store.hover(id),
+        onClick: (id) => store.select(id),
+        onCamera: (ratio) => store.setCamera(ratio),
+      }, deps);
+      setCanvasReady(true);
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      const detail = error instanceof Error ? error.message : String(error);
+      setCanvasError(`the graph canvas could not start (${detail}); this browser may lack WebGL. Try another browser or enable hardware acceleration.`);
+    });
+    return () => { cancelled = true; canvasRef.current?.destroy(); canvasRef.current = null; };
+  }, [model, store]);
+
+  useEffect(() => {
+    if (!canvasReady || !canvasRef.current) return;
+    let cancelled = false;
+    let lastSave = 0;
+    let latest: Float32Array | null = null;
+    // Semantic positions never enter the plain cache; pin writes retain its last plain positions.
+    const save = () => { if (latest && !semanticEdges) { store.savePositions(latest); lastSave = Date.now(); } };
+    const initial = withSemanticSprings(store.layoutGraph((id, index) => canvasRef.current?.positionOf(id) ?? hashPosition(id, index)), semanticEdges ?? []);
+    // A restart begins at the currently displayed coordinates, even when a plain cache exists.
+    model.nodes.forEach((node, index) => {
+      const live = canvasRef.current?.positionOf(node.id);
+      if (live) { initial.positions[index * 2] = live[0]; initial.positions[index * 2 + 1] = live[1]; }
+    });
+    const initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
+    void startLayout({
+      moduleUrl: env.moduleUrl ?? "",
+      workerAllowed: env.moduleUrl ? env.workerAllowed : false,
+      createWorker: env.createWorker,
+      graph: initial,
+      onPositions(positions, iterations) {
         if (cancelled) return;
-        canvasRef.current = mountGraphCanvas(host, model, store.getState(), store.cachedPositions(), {
-          onHover: (id) => store.hover(id),
-          onClick: (id) => store.select(id),
-          onCamera: (ratio) => store.setCamera(ratio),
-        }, deps);
-        setCanvasReady(true);
-        stage = "layout";
-        const initial = withSemanticSprings(store.layoutGraph(hashPosition), semanticEdges ?? []);
-        initialFixed = initial.fixed ?? new Uint8Array(model.nodes.length);
-        return startLayout({
-          moduleUrl: env.moduleUrl ?? "",
-          workerAllowed: env.moduleUrl ? env.workerAllowed : false,
-          createWorker: env.createWorker,
-          graph: initial,
-          onPositions(positions, iterations) {
-            canvasRef.current?.applyPositions(positions);
-            latest = positions;
-            if (Date.now() - lastSave > 2_000) save();
-            if (store.getState().layout.kind !== "paused") store.setLayout({ kind: "running", iterations });
-          },
-          onState(s) {
-            const current = store.getState().layout;
-            const iterations = "iterations" in current ? current.iterations : 0;
-            if (s === "running") store.setLayout({ kind: "running", iterations });
-            if (s === "paused") store.setLayout({ kind: "paused", iterations });
-            if (s === "done" || s === "stopped") { save(); store.setLayout({ kind: "settled", iterations }); }
-          },
-          onError: (message) => store.setLayout({ kind: "error", message }),
-        }).then((handle) => {
-          if (cancelled) { if (handle.state === "running") handle.teardown(); return; }
-          if (handle.state === "cached-only") store.setLayout({ kind: "cached-only", reason: handle.reason });
-          else {
-            layoutRef.current = handle;
-            // Pins toggled between init and ready were only in the store; bring the worker up to date now.
-            const drift = model.nodes.flatMap((node, index) => {
-              const pinned = store.getState().pinned.has(node.id);
-              if (pinned === (initialFixed[index] === 1)) return [];
-              const live = canvasRef.current?.positionOf(node.id);
-              return [{ index, fixed: pinned, ...(live ? { position: live } : {}) }];
-            });
-            if (drift.length) handle.fix(drift);
-            store.setLayout({ kind: "running", iterations: 0 });
-          }
+        canvasRef.current?.applyPositions(positions);
+        latest = positions;
+        if (Date.now() - lastSave > 2_000) save();
+        if (store.getState().layout.kind !== "paused") store.setLayout({ kind: "running", iterations });
+      },
+      onState(s) {
+        if (cancelled) return;
+        const current = store.getState().layout;
+        const iterations = "iterations" in current ? current.iterations : 0;
+        if (s === "running") store.setLayout({ kind: "running", iterations });
+        if (s === "paused") store.setLayout({ kind: "paused", iterations });
+        if (s === "done" || s === "stopped") { save(); store.setLayout({ kind: "settled", iterations }); }
+      },
+      onError: (message) => { if (!cancelled) store.setLayout({ kind: "error", message }); },
+    }).then((handle) => {
+      if (cancelled) { if (handle.state === "running") handle.teardown(); return; }
+      if (handle.state === "cached-only") { setSemanticOn(false); store.setLayout({ kind: "cached-only", reason: handle.reason }); }
+      else {
+        layoutRef.current = handle;
+        const drift = model.nodes.flatMap((node, index) => {
+          const pinned = store.getState().pinned.has(node.id);
+          if (pinned === (initialFixed[index] === 1)) return [];
+          const live = canvasRef.current?.positionOf(node.id);
+          return [{ index, fixed: pinned, ...(live ? { position: live } : {}) }];
         });
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
-        const detail = error instanceof Error ? error.message : String(error);
-        if (stage === "canvas") setCanvasError(`the graph canvas could not start (${detail}); this browser may lack WebGL. Try another browser or enable hardware acceleration.`);
-        else store.setLayout({ kind: "error", message: `the graph layout could not start (${detail}); the canvas keeps the cached positions. Reload the panel to try again.` });
-      });
-    return () => {
-      cancelled = true;
-      save();
-      layoutRef.current?.teardown();
-      layoutRef.current = null;
-      canvasRef.current?.destroy();
-      canvasRef.current = null;
-    };
-  }, [model, store, semanticEdges]);
+        if (drift.length) handle.fix(drift);
+        store.setLayout({ kind: "running", iterations: 0 });
+      }
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      const detail = error instanceof Error ? error.message : String(error);
+      store.setLayout({ kind: "error", message: `the graph layout could not start (${detail}); the canvas keeps the cached positions. Reload the panel to try again.` });
+    });
+    return () => { cancelled = true; save(); layoutRef.current?.teardown(); layoutRef.current = null; };
+  }, [model, store, canvasReady, semanticEdges]);
 
   useEffect(() => { canvasRef.current?.update(state); }, [state]);
   // The theme reaches the canvas through the container's computed tokens; re-read them after React applied the
@@ -293,7 +303,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>
-        {enrichment && graphSnapshot && <button type="button" className="vmem-button" aria-pressed={semanticOn} onClick={() => { setSemanticError(null); setSemanticOn(!semanticOn); }}>Semantic layout</button>}
+        {enrichment && graphSnapshot && state.layout.kind !== "cached-only" && <button type="button" className="vmem-button" aria-pressed={semanticOn} onClick={() => { setSemanticError(null); setSemanticOn(!semanticOn); }}>Semantic layout</button>}
         <button type="button" className="vmem-button" disabled={!selected} aria-pressed={state.pathSourceId !== null && !state.path} onClick={() => selected && store.pathTo(selected.id)}>
           {state.pathSourceId && !state.path ? "Path to…" : "Path from"}
         </button>
@@ -304,7 +314,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
       <p className="vmem-sub vmem-graph-status" role="status">{layoutLabel(state.layout)}</p>
       {canvasError ? <Notice tone="err">{canvasError}</Notice> : null}
       {semanticLoading && <p role="status">Loading semantic layout...</p>}
-      {semanticError && <><Notice tone="err">{semanticError}</Notice>{/restart from the first page/i.test(semanticError) && <button type="button" className="vmem-button" onClick={() => navigate("graph", vault ? { vault } : vaultParam(params))}>First page</button>}</>}
+      {semanticError && <Notice tone="err">{semanticError}</Notice>}
       {state.derived.focusMissing ? <Notice tone="warn">The focused note is not in this graph. Choose Global view.</Notice> : null}
       {state.pathMissing ? <Notice tone="warn">No path connects these notes. Pick another endpoint.</Notice> : null}
       <div
