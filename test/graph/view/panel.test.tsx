@@ -115,6 +115,23 @@ describe("GraphPanel", () => {
     await mount({ graph, graphStats: { placeholdersOmitted: 2 } });
     expect(container.textContent).toContain("Some unresolved links were omitted by the provider");
   });
+  test("chain search keeps the full chain and out-of-search note action", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id === "a" ? "Alpha" : id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision" }));
+    const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source, target, relation: "supersedes", fromFrontmatter: true }));
+    await mount({ graph: { nodes, edges } });
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
+    const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
+    // React was imported before happy-dom in this file, so its input event plugin is not attached; invoke the mounted
+    // input's current React handler to exercise the same search path and the real GraphView wiring.
+    const propsKey = Object.keys(input).find((key) => key.startsWith("__reactProps$"))!;
+    const props = (input as unknown as Record<string, { onChange(event: { currentTarget: HTMLInputElement }): void }>)[propsKey]!;
+    await act(async () => { input.value = "Alpha"; props.onChange({ currentTarget: input }); });
+    const panel = container.querySelector('[aria-label="Decision chains"]')!;
+    expect(panel.textContent).toContain("2 of 4 visible");
+    expect(panel.textContent).toContain("Open D");
+  });
   test("provider graphs without supersedes edges explain the missing chain data", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });

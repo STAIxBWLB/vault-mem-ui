@@ -162,7 +162,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       if (!visibleIds.length) return;
       set({ chainFocusIds: new Set(visibleIds), selectedId: visibleIds[0]!, focusId: visibleIds[0]! });
     },
-    clearChainFocus() { set({ chainFocusIds: new Set(), selectedId: null, focusId: null }); },
+    clearChainFocus() { set({ chainFocusIds: state.chainFocusIds.size ? new Set() : state.chainFocusIds, selectedId: null, focusId: null }); },
     pathTo(id) {
       if (id === null) return set({ pathSourceId: null, pathTargetId: null, path: null, pathMissing: false });
       if (!known(id) || !visible(id)) return;
