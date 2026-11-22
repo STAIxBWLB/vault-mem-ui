@@ -62,6 +62,8 @@ export interface GraphCanvasHandle {
   /** Applies a layout batch (model node order). */
   applyPositions(positions: ArrayLike<number>): void;
   focusNode(id: string): void;
+  /** Centre the camera on the extent of the selected nodes. */
+  focusNodes(ids: readonly string[]): void;
   /** Re-reads the graph colours from the container's computed tokens (after a host or person theme change) and redraws. */
   refreshTheme(): void;
   /** The node's current graph coordinates, or null. */
@@ -140,8 +142,9 @@ export function mountGraphCanvas(
       if (s.colorByCommunity && model?.community != null) patch.color = communityColor(model.community);
       const dimByHover = s.hoverId !== null && node !== s.hoverId && !neighbours.has(node);
       const dimByPath = pathNodes.size > 0 && !pathNodes.has(node);
-      if (dimByHover || dimByPath) patch.color = theme.dimNode;
-      if (pathNodes.has(node) || node === s.pathSourceId) { patch.forceLabel = true; patch.highlighted = true; }
+      const dimByChain = s.chainFocusIds.size > 0 && !s.chainFocusIds.has(node);
+      if (dimByHover || dimByPath || dimByChain) patch.color = theme.dimNode;
+      if (pathNodes.has(node) || s.chainFocusIds.has(node) || node === s.pathSourceId) { patch.forceLabel = true; patch.highlighted = true; }
       if (node === s.selectedId || node === s.focusId || node === s.hoverId) {
         patch.forceLabel = true;
         patch.highlighted = true;
@@ -159,15 +162,16 @@ export function mountGraphCanvas(
       const theme = graphTheme();
       const key = src < dst ? `${src}\u0000${dst}` : `${dst}\u0000${src}`;
       const onPath = pathEdges.has(key);
+      const onChain = s.chainFocusIds.has(src) && s.chainFocusIds.has(dst) && s.mode === "chains";
       const hovered = s.hoverId !== null && (src === s.hoverId || dst === s.hoverId);
       const focus = s.selectedId;
       const touchesFocus = focus !== null && (src === focus || dst === focus);
       // LOD: on a reduced view keep a stride sample, but never drop edges the person is looking at.
-      if (s.lod.edgeStride > 1 && !onPath && !hovered && !touchesFocus && (data.index as number) % s.lod.edgeStride !== 0) {
+      if (s.lod.edgeStride > 1 && !onPath && !onChain && !hovered && !touchesFocus && (data.index as number) % s.lod.edgeStride !== 0) {
         return { ...data, hidden: true };
       }
-      if (onPath || hovered || touchesFocus) return { ...data, color: theme.accent, size: Math.max(1.4, data.size as number) };
-      if (pathEdges.size > 0 || s.hoverId !== null) return { ...data, color: theme.edgeDim };
+      if (onPath || onChain || hovered || touchesFocus) return { ...data, color: theme.accent, size: Math.max(1.4, data.size as number) };
+      if (pathEdges.size > 0 || s.chainFocusIds.size > 0 || s.hoverId !== null) return { ...data, color: theme.edgeDim };
       return data;
     },
   });
@@ -195,7 +199,7 @@ export function mountGraphCanvas(
       const lodChanged = next.lod !== lastLod;
       const reducersChanged = prev.selectedId !== next.selectedId || prev.hoverId !== next.hoverId || prev.focusId !== next.focusId
         || prev.path !== next.path || prev.pathSourceId !== next.pathSourceId || prev.pinned !== next.pinned
-        || prev.colorByCommunity !== next.colorByCommunity;
+        || prev.colorByCommunity !== next.colorByCommunity || prev.chainFocusIds !== next.chainFocusIds;
       const visibilityChanged = prev.derived !== next.derived;
       // A camera move, a layout iteration count or a pause only changes what the reducers read when LOD flips.
       if (!lodChanged && !reducersChanged && !visibilityChanged) return;
@@ -234,6 +238,18 @@ export function mountGraphCanvas(
       const d = sigma.getNodeDisplayData(id);
       if (!d) return;
       sigma.getCamera().animate({ x: d.x, y: d.y, ratio: Math.min(sigma.getCamera().getState().ratio, 0.5) }, { duration: prefersReducedMotion() ? 0 : 300 });
+    },
+    focusNodes(ids) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const id of ids) {
+        const point = sigma.getNodeDisplayData(id);
+        if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) continue;
+        minX = Math.min(minX, point.x); minY = Math.min(minY, point.y);
+        maxX = Math.max(maxX, point.x); maxY = Math.max(maxY, point.y);
+      }
+      if (!Number.isFinite(minX)) return;
+      const span = Math.max(maxX - minX, maxY - minY);
+      sigma.getCamera().animate({ x: (minX + maxX) / 2, y: (minY + maxY) / 2, ratio: span ? Math.max(0.1, Math.min(8, span * 1.5)) : 0.5 }, { duration: prefersReducedMotion() ? 0 : 300 });
     },
     refreshTheme() {
       refreshGraphTheme(container);

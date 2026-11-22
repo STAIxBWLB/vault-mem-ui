@@ -39,9 +39,10 @@ interface Fake {
   refreshes: number;
   killed: boolean;
   edgeColors: Map<string, string>;
+  cameraMoves: Partial<{ x: number; y: number; ratio: number }>[];
 }
 function fakeCanvas(): Fake {
-  const fake: Fake = { attrs: new Map(), edgeAttrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
+  const fake: Fake = { attrs: new Map(), edgeAttrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), cameraMoves: [], deps: null! };
   const graph: GraphLike = {
     addNode: (id, a) => fake.attrs.set(id, { ...a }),
     addEdgeWithKey: (key, _s, _t, a) => fake.edgeAttrs.set(key, { ...a }),
@@ -58,8 +59,8 @@ function fakeCanvas(): Fake {
   };
   const sigma: SigmaLike = {
     on: (e, h) => fake.handlers.set(e, h),
-    getCamera: () => ({ getState: () => ({ ratio: 1 }), on: () => undefined, animate: () => undefined }),
-    getNodeDisplayData: (id) => (fake.attrs.has(id) ? { x: 0, y: 0 } : undefined),
+    getCamera: () => ({ getState: () => ({ ratio: 1 }), on: () => undefined, animate: (state) => { fake.cameraMoves.push(state); } }),
+    getNodeDisplayData: (id) => (fake.attrs.has(id) ? { x: Number(fake.attrs.get(id)!.x), y: Number(fake.attrs.get(id)!.y) } : undefined),
     setSetting: (k, v) => { fake.settings[k] = v; },
     refresh: () => { fake.refreshes += 1; },
     hasProgramIndices: () => true,
@@ -113,6 +114,39 @@ describe("GraphPanel", () => {
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     await mount({ graph, graphStats: { placeholdersOmitted: 2 } });
     expect(container.textContent).toContain("Some unresolved links were omitted by the provider");
+  });
+  test("provider graphs without supersedes edges explain the missing chain data", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md", type: "decision" }, { id: "b", label: "B", relPath: "notes/b.md", type: "decision" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false }] } });
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
+    expect(container.textContent).toContain("provider's graph does not carry supersedes edges yet");
+    expect(container.textContent).toContain("STAIxBWLB/vault-mem#294");
+    expect(container.querySelector('[aria-label="Decision chains"]')?.textContent).not.toContain("Focus chain:");
+  });
+
+  test("decision chain mode lists a chain, focuses it and opens a note", async () => {
+    const fake = fakeCanvas();
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const opened: unknown[] = [];
+    await mount({ graph: { nodes: [
+      { id: "first", label: "First", relPath: "notes/first.md", type: "decision", date: "2025-01-01" },
+      { id: "second", label: "Second", relPath: "notes/second.md", type: "decision", date: "2026-01-01" },
+    ], edges: [{ source: "first", target: "second", relation: "supersedes", fromFrontmatter: true }] } }, (panel, params) => opened.push({ panel, params }));
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
+    const focus = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Focus chain: First → Second"))!;
+    expect(focus).toBeDefined();
+    await act(async () => focus.click());
+    expect(focus.getAttribute("aria-pressed")).toBe("true");
+    const reduce = fake.settings.nodeReducer as (id: string, data: Record<string, unknown>) => Record<string, unknown>;
+    expect(reduce("first", fake.attrs.get("first")!).highlighted).toBe(true);
+    expect(reduce("second", fake.attrs.get("second")!).highlighted).toBe(true);
+    const first = fake.attrs.get("first")!, second = fake.attrs.get("second")!;
+    expect(fake.cameraMoves.at(-1)).toMatchObject({ x: (Number(first.x) + Number(second.x)) / 2, y: (Number(first.y) + Number(second.y)) / 2 });
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Open First")!.click(); });
+    expect(opened).toEqual([{ panel: "note", params: { path: "notes/first.md" } }]);
+    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Global view")!.click(); });
+    expect(container.querySelector('[aria-label="Decision chains"]')).toBeNull();
   });
   test("provider errors are shown unchanged with a first-page retry", async () => {
     const navigations: unknown[] = [];
@@ -376,12 +410,12 @@ describe("GraphPanel", () => {
       await act(async () => { canvas.dispatchEvent(event); });
       expect(event.defaultPrevented).toBe(false);
     }
-    expect(container.textContent).not.toContain("Global view");
+    expect([...container.querySelectorAll("button")].find((b) => b.textContent === "Global view")?.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("Alpha");
     const bare = new KeyboardEvent("keydown", { key: "l", bubbles: true, cancelable: true });
     await act(async () => { canvas.dispatchEvent(bare); });
     expect(bare.defaultPrevented).toBe(true);
-    expect(container.textContent).toContain("Global view");
+    expect([...container.querySelectorAll("button")].find((b) => b.textContent === "Local view")?.getAttribute("aria-pressed")).toBe("true");
   });
 
   test("toolbar opens the local view and back", async () => {
@@ -392,8 +426,8 @@ describe("GraphPanel", () => {
     await act(async () => fake.handlers.get("clickNode")!({ node: "a" }));
     const button = (label: string) => [...container.querySelectorAll("button")].find((b) => b.textContent === label)!;
     await act(async () => button("Local view").click());
-    expect(container.textContent).toContain("Global view");
+    expect(button("Local view").getAttribute("aria-pressed")).toBe("true");
     await act(async () => button("Global view").click());
-    expect(button("Global view")).toBeUndefined();
+    expect(button("Global view").getAttribute("aria-pressed")).toBe("true");
   });
 });

@@ -1,6 +1,7 @@
 /** Read-only controls adapted from STAIxBWLB/maru@b33341df src/components/graph/GraphFilterPanel, GraphLegend, GraphInspector and GraphInsightsPanel. */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { findBridges, findHiddenLinks, findOrphans, findSurprisingConnections } from "../insights";
+import { buildDecisionChains } from "../decisionChains";
 import type { GraphModel, GraphNode } from "../model";
 import { GRAPH_SEARCH_LIMIT, rankGraphSearch } from "../search";
 import { communityColor, refreshGraphTheme } from "../style";
@@ -8,6 +9,24 @@ import type { GraphFilterProfile } from "../types";
 import { LARGE_GRAPH_EDGES } from "../layout/protocol";
 import type { GraphViewState, GraphViewStore } from "./state";
 import { OPEN_PROFILE } from "./state";
+
+/** Chain groups use the existing maru-derived decisionChains.ts model. */
+export function GraphChainsPanel({ state, hasSupersedes, focus, open }: { state: GraphViewState; hasSupersedes: boolean; focus(ids: string[]): void; open(id: string): void }) {
+  const layout = useMemo(() => buildDecisionChains(state.derived.visibleModel), [state.derived.visibleModel]);
+  return <section className="vmem-card vmem-graph-panel" aria-label="Decision chains">
+    <h2 className="vmem-card-title">Decision chains</h2>
+    {!hasSupersedes && <p>The provider's graph does not carry supersedes edges yet (STAIxBWLB/vault-mem#294).</p>}
+    {layout.chains.length === 0 && <p>No linked decision chains in the current graph.</p>}
+    <ol>{layout.chains.map((chain) => {
+      const ids = chain.nodes.map((node) => node.id);
+      const selected = ids.length === state.chainFocusIds.size && ids.every((id) => state.chainFocusIds.has(id));
+      return <li key={JSON.stringify(ids)}><button type="button" className="vmem-button" aria-pressed={selected} onClick={() => focus(ids)}>Focus chain: {chain.nodes.map((node) => node.label).join(" → ")}</button>
+        <ul>{chain.nodes.map((node) => <li key={node.id}><button type="button" className="vmem-button" disabled={!node.relPath} onClick={() => open(node.id)}>Open {node.label}</button>{node.date ? ` (${node.date})` : ""}</li>)}</ul>
+      </li>;
+    })}</ol>
+    {layout.isolated.length > 0 && <><h3>Unlinked decisions</h3><ul>{layout.isolated.map((node) => <li key={node.id}><button type="button" className="vmem-button" onClick={() => focus([node.id])}>Focus {node.label}</button> <button type="button" className="vmem-button" disabled={!node.relPath} onClick={() => open(node.id)}>Open {node.label}</button></li>)}</ul></>}
+  </section>;
+}
 
 function Facet({ label, items, values, update }: { label: string; items: { value: string; count: number }[]; values: string[]; update(values: string[]): void }) {
   return <fieldset className="vmem-graph-facet"><legend>{label}</legend>{items.map((item) => <label key={item.value} className="vmem-graph-option"><input type="checkbox" checked={values.includes(item.value)} onChange={() => update(values.includes(item.value) ? values.filter((v) => v !== item.value) : [...values, item.value])} /> {item.value} ({item.count})</label>)}</fieldset>;

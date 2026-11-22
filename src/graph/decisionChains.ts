@@ -68,8 +68,9 @@ export function buildDecisionChains(model: GraphModel): DecisionChainLayout {
     }
   }
 
+  const chained = new Set(chains.flatMap((chain) => chain.nodes.map((node) => node.id)));
   const isolated = [...decisions.values()]
-    .filter((n) => !chains.some((chain) => chain.nodes.some((m) => m.id === n.id)))
+    .filter((n) => !chained.has(n.id))
     .sort((a, b) => compareByDate(b, a));
 
   chains.sort(
