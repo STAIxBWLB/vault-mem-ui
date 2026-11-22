@@ -65,6 +65,25 @@ const press = (key: string, shiftKey = false) => {
 };
 
 describe("WriteDialog focus", () => {
+  test("a write in progress disables confirmation and cancellation", () => {
+    mount({ phase: "confirming", verb: "Delete note" });
+    expect(dialog()?.textContent).toContain("Applying changes...");
+    expect([...dialog()!.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+    expect(focused()).toBe(dialog());
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    act(() => dialog()!.dispatchEvent(tab));
+    expect(tab.defaultPrevented).toBe(true);
+    expect(focused()).toBe(dialog());
+  });
+
+  test("the waiting notice offers a way to close", () => {
+    let closed = 0;
+    mount({ phase: "waiting", message: "Still waiting for the vault. It may already be applied; reload the panel to see the current state." }, () => { closed += 1; });
+    expect(dialog()?.textContent).toContain("may already be applied");
+    act(() => dialog()!.querySelector("button")!.click());
+    expect(closed).toBe(1);
+  });
+
   test("opening moves the focus into the dialog, so the panel behind it cannot be typed into", () => {
     const opener = outside();
     mount(preview);

@@ -113,14 +113,14 @@ describe("confirmWrite", () => {
     expect(host.calls.action).toEqual([]);
   });
 
-  test("a failed confirmation keeps the fingerprint, so the person can retry the same preview", async () => {
+  test("a failed confirmation warns that the write may have been applied", async () => {
     const host = createFakeHost({ replies: { delete: preview } });
     const state = await startWrite(host, { action: "delete", path: "notes/a.md" });
     host.action = async () => {
       throw new Error("timeout");
     };
     const failed = await confirmWrite(host, state);
-    expect(failed).toEqual({ phase: "error", message: "Delete note was not confirmed: timeout. Check the host connection and try again." });
+    expect(failed).toEqual({ phase: "error", message: "Delete note: timeout. It may already have been applied; reload the panel to check the current state." });
     expect(state).toMatchObject({ phase: "preview", fingerprint: "sha256:abc" });
   });
 });

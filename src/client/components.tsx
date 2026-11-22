@@ -151,15 +151,16 @@ export function WriteDialog(props: { state: WriteState; onConfirm(): void; onCan
       if (back instanceof HTMLElement && back.isConnected) back.focus();
     };
   }, [open]);
+  useEffect(() => { if (state.phase === "confirming") box.current?.focus(); }, [state.phase]);
 
   if (!open) return null;
-  const heading = state.phase === "preview" ? state.verb : state.phase === "done" ? "Done" : state.phase === "cancelled" ? "Cancelled" : "Refused";
+  const heading = state.phase === "preview" || state.phase === "confirming" ? state.verb : state.phase === "waiting" ? "Still waiting" : state.phase === "done" ? "Done" : state.phase === "cancelled" ? "Cancelled" : "Refused";
   const trap = (event: React.KeyboardEvent<HTMLElement>) => {
     if (event.key !== "Tab") return;
     const inside = box.current;
     if (!inside) return;
-    const focusable = [...inside.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])')];
-    if (!focusable.length) return;
+    const focusable = [...inside.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')];
+    if (!focusable.length) { event.preventDefault(); inside.focus(); return; }
     const first = focusable[0]!;
     const last = focusable[focusable.length - 1]!;
     const at = document.activeElement;
@@ -189,7 +190,9 @@ export function WriteDialog(props: { state: WriteState; onConfirm(): void; onCan
         onKeyDown={trap}
       >
         <h2 className="vmem-dialog-title">{heading}</h2>
-        {state.phase === "preview" ? (
+        {state.phase === "confirming" ? (
+          <><p role="status">Applying changes...</p><div className="vmem-bar"><button type="button" className="vmem-button vmem-button-danger" disabled>Confirm</button><button type="button" className="vmem-button" disabled>Cancel</button></div></>
+        ) : state.phase === "preview" ? (
           <>
             <p className="vmem-sub">Nothing has been written yet. These are the planned changes:</p>
             <ul className="vmem-changes">
