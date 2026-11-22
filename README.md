@@ -54,6 +54,21 @@ The vault it serves is the one vmem resolves for this process, not `$AGENTHUB_HO
 - A provider failure is logged to the terminal and answered with the reason and the next step.
 - The page runs every panel this bundle implements; a provider panel without a view stays out of the manifest instead of appearing as an empty tab.
 
+## Releasing
+
+A release is one tag on a green `main`: the tag runs the checks again, packs once and publishes that exact tarball to npm with provenance, then creates the GitHub release from the changelog section.
+
+1. Release-prep PR: bump `version` in `package.json` and move the `## [Unreleased]` entries under `## [x.y.z] - YYYY-MM-DD`. Until that dated section exists the tag is refused, because `Unreleased` alone is not a release.
+2. Merge it, then on a clean, up-to-date `main`: `bun run release:tag --push`. Without `--push` the annotated tag stays local. The script refuses a tree that is not clean, a `main` behind `origin/main`, a tag that already exists, a version that does not increase over the existing release tags, and a missing dated section, and each refusal names the next step.
+3. `.github/workflows/release.yml` re-checks the tag against the package version and the changelog, requires the commit to be on `main` with a green `Check` run for it, runs `bun run check`, shows the `npm pack` file list, and stages the tarball with a SHA-256 manifest.
+
+The `Publish approved artifact with npm OIDC` job runs only when the repository variable `NPM_PUBLISH_ENABLED` is `true`; `Publish the GitHub release` follows it. Settings a person configures once, none of which this repository sets up:
+
+- npm trusted publisher for `@staix/vault-mem-ui`: publisher GitHub, repository `STAIxBWLB/vault-mem-ui`, workflow `release.yml`, environment `npm-production`.
+- Repository variable `NPM_PUBLISH_ENABLED=true`; unset or any other value keeps publication off.
+- The `npm-production` environment, with whatever protection rules it should carry.
+- Provenance comes from the publish job's own `id-token: write`, so no npm token secret is stored.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

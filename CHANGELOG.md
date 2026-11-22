@@ -1,0 +1,15 @@
+# Changelog
+
+All notable changes to `@staix/vault-mem-ui` go here. Entries are grouped under a version heading that carries the
+release date, in the shape `## [x.y.z] - YYYY-MM-DD`, and the release workflow publishes only a version with such a
+section. `## [Unreleased]` holds the work that no release has shipped yet.
+
+## [Unreleased]
+
+### Added
+
+- The `acon` console plugin that keeps `@staix/vault-mem/ui-plugin` as its provider and serves this package's own panel bundle.
+- The client panels for vmem's overview, search, note, promote, lint, log, settings, proposals, assertions and history, the note body rendered as Markdown, and the graph view with its local view, shortest path, pins and level of detail.
+- The standalone `vmem-ui` host and its `bin` entry, serving the same bundle on loopback through the provider.
+- The import boundary check that keeps `src/` on the provider, and the third-party notices check on the bundle's inputs.
+- The tag-driven release workflow, its release scripts, and this changelog.
