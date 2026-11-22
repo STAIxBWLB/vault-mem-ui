@@ -3,8 +3,11 @@ import ts from "typescript";
 /** The two files the console's panel assets come from; nothing else may be read from this package's build output. */
 const PANEL_ASSETS = new Set(["../../dist/panel.js", "../../dist/panel.css"]);
 
-/** The global object under every name it answers to. */
-const GLOBAL_NAMES = new Set(["globalThis", "self", "window"]);
+/**
+ * The global object under every name it answers to: `globalThis` everywhere, `global` under Bun (where `self` is also
+ * that object), and `self` or `window` in a page.
+ */
+const GLOBAL_NAMES = new Set(["global", "globalThis", "self", "window"]);
 
 /** The expression without the parentheses around it: `(globalThis)` is still `globalThis`. */
 function peel(node: ts.Expression): ts.Expression {
@@ -23,12 +26,12 @@ function memberName(expression: ts.Expression): { owner: ts.Expression; name: st
   return undefined;
 }
 
-/** The global object by any of its names; `globalThis.globalThis` reaches the same object. */
+/** The global object by any of its names; `globalThis.globalThis` and `globalThis.self` reach the same object. */
 function globalObject(expression: ts.Expression): boolean {
   const node = peel(expression);
   if (ts.isIdentifier(node)) return GLOBAL_NAMES.has(node.text);
   const member = memberName(node);
-  return !!member && member.name === "globalThis" && globalObject(member.owner);
+  return !!member && GLOBAL_NAMES.has(member.name) && globalObject(member.owner);
 }
 
 /** `process` (or `module`) itself, and the same property read off the global object. */
@@ -105,6 +108,11 @@ function reflectiveGlobalWrite(node: ts.Node): string | undefined {
     return undefined;
   };
   if (ts.isBinaryExpression(node) && GLOBAL_ASSIGNMENTS.has(node.operatorToken.kind)) return throughTarget(node.left);
+  // A loop target is written on every iteration without an assignment of its own, so `for (globalThis["URL"] of ...)`
+  // rebinds the global just as a plain assignment does.
+  if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && !ts.isVariableDeclarationList(node.initializer)) {
+    return throughTarget(node.initializer);
+  }
   if (!ts.isCallExpression(node)) return undefined;
   const member = memberName(node.expression);
   const target = node.arguments[0];

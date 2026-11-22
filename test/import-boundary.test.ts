@@ -41,6 +41,9 @@ const bad = [
   'module.require(name)',
   'process["getBuiltinModule"]("node:fs")',
   'module["require"]("node:fs")',
+  // Under Bun the global object also answers to `global`, and its names reach each other.
+  'global.process.getBuiltinModule("node:fs")',
+  'globalThis.self.process.getBuiltinModule("node:fs")',
 ];
 
 test("boundary catches prohibited access", () => {
@@ -109,6 +112,15 @@ const refuses: [string, string][] = [
   ['import { readFileSync } from "node:fs";\n[window["URL"]] = [class {}];\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring write to the global URL through window"],
   ['import { readFileSync } from "node:fs";\nObject["defineProperty"](self, "URL", { value: class {} });\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed defineProperty on the global URL through self"],
   ['import { readFileSync } from "node:fs";\nReflect["set"](window, "URL", class {});\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a bracketed Reflect.set on the global URL through window"],
+  // Under Bun the global object also answers to `global`, and each of its names reaches the others, so
+  // `globalThis.self` and `window.window` are the same object a bare `globalThis` names.
+  ['import { readFileSync } from "node:fs";\nglobal["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through Bun's global"],
+  ['import { readFileSync } from "node:fs";\nglobalThis.self["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through globalThis.self"],
+  ['import { readFileSync } from "node:fs";\nwindow.window["URL"] = class {};\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a write to the global URL through window.window"],
+  // A loop target is written on every iteration, so it rebinds the global without an assignment operator.
+  ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] of [class {}]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-of target writing the global URL"],
+  ['import { readFileSync } from "node:fs";\nfor (globalThis["URL"] in { own: class {} }) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a for-in target writing the global URL"],
+  ['import { readFileSync } from "node:fs";\nfor ([globalThis["URL"]] of [[class {}]]) {}\nreadFileSync(new URL("../../dist/panel.js", import.meta.url), "utf8")', "a destructuring for-of target writing the global URL"],
   ['import { readFileSync } from "node:fs";\nconst fs = process.getBuiltinModule("node:fs");\nfs.writeFileSync("notes/a.md", "x")', "a builtin module load"],
   ['import { readFileSync } from "node:fs";\nconst fs = import.meta.require("node:fs");', "an import.meta.require load"],
 ];
