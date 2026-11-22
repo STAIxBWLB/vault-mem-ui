@@ -25,7 +25,7 @@ async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params
   if (!start.totals || !Number.isSafeInteger(start.totals.nodes) || !Number.isSafeInteger(start.totals.edges) || start.totals.nodes < 0 || start.totals.edges < 0)
     return { error: "Graph provider returned malformed totals; update @staix/vault-mem or report its version." };
   if (start.totals.nodes > MAX_NODES || start.totals.edges > MAX_EDGES)
-    return { error: `Graphs larger than ${MAX_NODES.toLocaleString("en-US")} notes or ${MAX_EDGES.toLocaleString("en-US")} links are not supported in this panel yet; use Search or the note list instead.` };
+    return { error: `Graphs larger than ${MAX_NODES.toLocaleString("en-US")} notes or ${MAX_EDGES.toLocaleString("en-US")} links are not supported in this panel yet; use Search instead.` };
   const nodes: GraphInput["nodes"] = [], edges: GraphInput["edges"] = [];
   const communities: Record<string, number> = Object.create(null);
   const seen = new Set<string>();
@@ -54,7 +54,9 @@ async function assemble(first: SnapshotReply, snapshot: Host["snapshot"], params
         const source = c.source[i]!, target = c.target[i]!, relationIndex = c.relation[i]!;
         if (!Number.isSafeInteger(source) || !Number.isSafeInteger(target) || !Number.isSafeInteger(relationIndex) || !nodes[source] || !nodes[target] || typeof c.relations[relationIndex] !== "string") return { error: "Graph edge references are invalid; restart from the first page." };
         const kind = c.relations[relationIndex]!;
-        edges.push({ source: nodes[source]!.id, target: nodes[target]!.id, relation: kind === "wiki_link" ? c.rel[i] || "wiki_link" : c.field[i] || kind, fromFrontmatter: kind !== "wiki_link" });
+        // Both declarations describe newer superseding older; normalize before the model deduplicates reciprocal edges.
+        const reverse = kind === "supersedes" && c.field[i] === "superseded_by";
+        edges.push({ source: nodes[reverse ? target : source]!.id, target: nodes[reverse ? source : target]!.id, relation: kind === "wiki_link" ? c.rel[i] || "wiki_link" : kind === "supersedes" ? "supersedes" : c.field[i] || kind, fromFrontmatter: kind !== "wiki_link" });
       }
     } else return { error: "Graph page kind is invalid; restart from the first page." };
     if (nodes.length > start.totals.nodes || edges.length > start.totals.edges) return { error: "Graph page totals are invalid; restart from the first page." };

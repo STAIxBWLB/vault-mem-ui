@@ -113,7 +113,7 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     const nodes = ["alpha", "beta", "omega", "zeta"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, type: "decision" }));
-    const edges = [["alpha", "beta"], ["omega", "zeta"]].map(([source, target]) => ({ source, target, relation: "supersedes", fromFrontmatter: true }));
+    const edges = [["alpha", "beta"], ["omega", "zeta"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true }));
     await mount({ graph: { nodes, edges } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
@@ -134,7 +134,7 @@ describe("GraphPanel", () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     const nodes = ["a", "b", "c", "d"].map((id) => ({ id, label: id === "a" ? "Alpha" : id.toUpperCase(), relPath: `notes/${id}.md`, type: "decision", domain: id === "a" ? "x" : "y" }));
-    const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source, target, relation: "supersedes", fromFrontmatter: true }));
+    const edges = [["a", "b"], ["b", "c"], ["c", "d"]].map(([source, target]) => ({ source: target, target: source, relation: "supersedes", fromFrontmatter: true }));
     await mount({ graph: { nodes, edges } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const input = container.querySelector<HTMLInputElement>("#vmem-graph-search")!;
@@ -152,13 +152,12 @@ describe("GraphPanel", () => {
     expect(panel.textContent).toContain("1 of 4 visible");
     expect(panel.textContent).toContain("Open D");
   });
-  test("provider graphs without supersedes edges explain the missing chain data", async () => {
+  test("graphs without supersedes edges explain the empty chain view", async () => {
     const fake = fakeCanvas();
     configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
     await mount({ graph: { nodes: [{ id: "a", label: "A", relPath: "notes/a.md", type: "decision" }, { id: "b", label: "B", relPath: "notes/b.md", type: "decision" }], edges: [{ source: "a", target: "b", relation: "wiki_link", fromFrontmatter: false }] } });
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
-    expect(container.textContent).toContain("provider's graph does not carry supersedes edges yet");
-    expect(container.textContent).toContain("STAIxBWLB/vault-mem#294");
+    expect(container.textContent).toContain("This graph has no supersedes edges");
     expect(container.querySelector('[aria-label="Decision chains"]')?.textContent).not.toContain("Focus chain:");
   });
 
@@ -169,7 +168,7 @@ describe("GraphPanel", () => {
     await mount({ graph: { nodes: [
       { id: "first", label: "First", relPath: "notes/first.md", type: "decision", date: "2025-01-01" },
       { id: "second", label: "Second", relPath: "notes/second.md", type: "decision", date: "2026-01-01" },
-    ], edges: [{ source: "first", target: "second", relation: "supersedes", fromFrontmatter: true }] } }, (panel, params) => opened.push({ panel, params }));
+    ], edges: [{ source: "second", target: "first", relation: "supersedes", fromFrontmatter: true }] } }, (panel, params) => opened.push({ panel, params }));
     await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Decision chains")!.click(); });
     const focus = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Focus chain: First → Second"))!;
     expect(focus).toBeDefined();
