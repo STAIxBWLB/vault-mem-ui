@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Chip, Empty, Field, List, Notice } from "../components.tsx";
 import { list, rec, str, type LinkRow } from "../data.ts";
+import { Markdown } from "../markdown/render.tsx";
 import type { ViewProps } from "./common.ts";
 import { vaultParam } from "./common.ts";
 
@@ -98,7 +99,11 @@ export function NoteView({ reply, params, navigate, beginWrite }: ViewProps) {
         </form>
       ) : null}
       <section className="vmem-section" aria-label="Body">
-        <pre className="vmem-body">{str(note.body)}</pre>
+        <Markdown
+          text={str(note.body)}
+          links={reply.links}
+          onOpenNote={(path) => navigate("note", { path, ...vaultParam(params) })}
+        />
         {note.truncated ? <Notice tone="warn">Truncated; open the file for the rest.</Notice> : null}
       </section>
       <section className="vmem-section" aria-label="Links">

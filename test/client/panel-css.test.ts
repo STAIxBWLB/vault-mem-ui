@@ -4,6 +4,14 @@ import { readFileSync } from "node:fs";
 const css = readFileSync(new URL("../../src/client/panel.css", import.meta.url), "utf8");
 
 describe("panel.css", () => {
+  test("proposal text retains the bounded, wrapping body style", () => {
+    const rule = /\.vmem-body\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toContain("max-height: 60vh");
+    expect(rule).toContain("white-space: pre-wrap");
+    expect(rule).toContain("overflow-wrap: anywhere");
+    expect(rule).toContain("var(--vmem-mono)");
+    expect(readFileSync(new URL("../../src/client/views/proposals.tsx", import.meta.url), "utf8")).toContain('className="vmem-body"');
+  });
   test("loads nothing remote and imports nothing, so the panel is one file the host serves", () => {
     expect(css).not.toMatch(/@import/i);
     expect(css).not.toMatch(/url\(/i);
