@@ -24,6 +24,8 @@ export interface GraphViewState {
   mode: ViewMode;
   /** Local view centre; also the node the keyboard moves from. */
   focusId: string | null;
+  /** Fixed centre of the local view, independent of keyboard selection. */
+  localCenterId: string | null;
   localDepth: 1 | 2 | 3;
   selectedId: string | null;
   hoverId: string | null;
@@ -84,7 +86,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   });
   let analysis = derive("global", null, 2, OPEN_PROFILE);
   let state: GraphViewState = {
-    mode: "global", focusId: null, localDepth: 2, selectedId: null, hoverId: null,
+    mode: "global", focusId: null, localCenterId: null, localDepth: 2, selectedId: null, hoverId: null,
     pathSourceId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
     pinned: new Set(cached.pinned.filter((id) => ids.has(id))),
     layout: { kind: "idle" }, cameraRatio: 1,
@@ -110,7 +112,19 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     const selectedId = has(state.selectedId) ? state.selectedId : null;
     const hoverId = has(state.hoverId) ? state.hoverId : null;
     const focusId = has(state.focusId) ? state.focusId : null;
-    return { derived, selectedId, hoverId, focusId, pathSourceId: null, path: null, pathMissing: false };
+    const sourceVisible = has(state.pathSourceId);
+    let pathValid = sourceVisible;
+    if (state.path) {
+      const remaining = pathEdgeKeys(state.path);
+      for (const edge of derived.visibleModel.edges) {
+        const [a, b] = edge.source < edge.target ? [edge.source, edge.target] : [edge.target, edge.source];
+        remaining.delete(`${a}\u0000${b}`);
+        if (!remaining.size) break;
+      }
+      pathValid = sourceVisible && state.path.every((id) => has(id)) && remaining.size === 0;
+    }
+    return { derived, selectedId, hoverId, focusId, pathSourceId: pathValid ? state.pathSourceId : null,
+      path: pathValid ? state.path : null, pathMissing: pathValid ? state.pathMissing : false };
   };
 
   return {
@@ -125,7 +139,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       const mode: ViewMode = id === null ? "global" : "local";
       analysis = derive(mode, id, depth, state.profile);
       const derived = applyGraphSearch(analysis, state.search);
-      set({ ...reconcile(derived), mode, focusId: id, localDepth: depth, selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
+      set({ ...reconcile(derived), mode, focusId: id, localCenterId: id, localDepth: depth, selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
     },
     pathTo(id) {
       if (id === null) return set({ pathSourceId: null, path: null, pathMissing: false });
@@ -143,7 +157,7 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     },
     setColorByCommunity(on) { set({ colorByCommunity: on && model.enriched }); },
     setProfile(profile) {
-      analysis = derive(state.mode, state.focusId, state.localDepth, profile);
+      analysis = derive(state.mode, state.localCenterId, state.localDepth, profile);
       set({ profile, ...reconcile(applyGraphSearch(analysis, state.search)) });
     },
     setSearch(search) {

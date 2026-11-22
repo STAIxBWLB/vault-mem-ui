@@ -231,9 +231,9 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
       />
       <aside className="vmem-graph-sidebar" aria-label="Graph details">
         <GraphFilterPanel state={state} store={store} />
-        <GraphLegend state={state} />
+        <GraphLegend state={state} themeKey={themeKey} />
         <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />
-        <GraphInsightsPanel model={state.derived.analysisModel} select={(id) => store.select(id)} />
+        <GraphInsightsPanel model={state.derived.analysisModel} visibleIds={state.derived.visibleNodeIds} select={(id) => store.select(id)} />
       </aside>
       <p id="vmem-graph-selected" className="vmem-sub" aria-live="polite">
         {selected ? `${selected.label}${selected.relPath ? "" : " (unresolved link)"} · ${selected.degree} links${state.path ? ` · path of ${state.path.length - 1} steps` : ""}` : "No note selected"}

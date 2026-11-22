@@ -1,8 +1,9 @@
 /** Read-only controls adapted from STAIxBWLB/maru@b33341df src/components/graph/GraphFilterPanel, GraphLegend, GraphInspector and GraphInsightsPanel. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { findBridges, findHiddenLinks, findOrphans, findSurprisingConnections } from "../insights";
 import type { GraphModel, GraphNode } from "../model";
-import { rankGraphSearch } from "../search";
+import { GRAPH_SEARCH_LIMIT, rankGraphSearch } from "../search";
+import { communityColor, refreshGraphTheme } from "../style";
 import type { GraphFilterProfile } from "../types";
 import { LARGE_GRAPH_EDGES } from "../layout/protocol";
 import type { GraphViewState, GraphViewStore } from "./state";
@@ -16,11 +17,11 @@ export function GraphFilterPanel({ state, store }: { state: GraphViewState; stor
   const { profile, derived } = state;
   const update = (patch: Partial<GraphFilterProfile>) => store.setProfile({ ...profile, ...patch });
   const results = useMemo(() => rankGraphSearch(derived.analysisModel.nodes, state.search), [derived.analysisModel, state.search]);
-  return <section className="vmem-graph-panel" aria-label="Graph filters">
-    <h2>Search and filters</h2>
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph filters">
+    <h2 className="vmem-card-title">Search and filters</h2>
     <label htmlFor="vmem-graph-search">Search notes</label>
     <input id="vmem-graph-search" className="vmem-input" type="search" value={state.search} onChange={(e) => store.setSearch(e.currentTarget.value)} />
-    {state.search && <><p role="status">{results.length} search results</p><ul aria-label="Graph search results">{results.map((item) => <li key={item.id}><button type="button" className="vmem-button" onClick={() => store.select(item.id)}>{item.label}</button></li>)}</ul></>}
+    {state.search && <><p role="status">{results.length === GRAPH_SEARCH_LIMIT ? `First ${GRAPH_SEARCH_LIMIT} results` : `${results.length} search results`}</p><ul aria-label="Graph search results">{results.map((item) => <li key={item.id}><button type="button" className="vmem-button" onClick={() => store.select(item.id)}>{item.label}</button></li>)}</ul></>}
     <Facet label="Domains" items={derived.facets.domains} values={profile.domains} update={(domains) => update({ domains })} />
     <Facet label="Types" items={derived.facets.types} values={profile.types} update={(types) => update({ types })} />
     <Facet label="Relations" items={derived.facets.relations} values={profile.relations} update={(relations) => update({ relations })} />
@@ -33,22 +34,29 @@ export function GraphFilterPanel({ state, store }: { state: GraphViewState; stor
   </section>;
 }
 
-export function GraphLegend({ state }: { state: GraphViewState }) {
-  const { facets } = state.derived;
-  return <section className="vmem-graph-panel" aria-label="Graph legend"><h2>Legend</h2><p>Node size reflects the number of links. Highlighted nodes show selection or path.</p><p>Domains: {facets.domains.map((item) => item.value).join(", ") || "none"}</p><p>Relations: {facets.relations.map((item) => item.value).join(", ") || "none"}</p><p>Communities: {facets.communities.map((item) => item.value).join(", ") || "none"}</p></section>;
+export function GraphLegend({ state, themeKey = "" }: { state: GraphViewState; themeKey?: string }) {
+  const swatches = useRef<HTMLUListElement>(null);
+  const communities = state.derived.facets.communities;
+  useEffect(() => {
+    const list = swatches.current;
+    if (!list) return;
+    refreshGraphTheme(list.closest(".vmem-graph")?.querySelector(".vmem-graph-canvas"));
+    list.querySelectorAll<HTMLElement>("[data-community]").forEach((el) => { el.style.backgroundColor = communityColor(Number(el.dataset.community)); });
+  }, [communities, themeKey]);
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph legend"><h2 className="vmem-card-title">Legend</h2><p>Node size reflects link count. Unresolved notes use the canvas background. Selected and path nodes are highlighted.</p><p>Arrows represent frontmatter links; lines represent other links.</p>{state.colorByCommunity && communities.length > 0 && <ul ref={swatches} aria-label="Community colours">{communities.map((item) => <li key={item.value}><span className="vmem-community-swatch" data-community={item.value} aria-hidden="true" /> Community {item.value}</li>)}</ul>}</section>;
 }
 
 export function GraphInspector({ node, model, open }: { node: GraphNode | null; model: GraphModel; open(id: string): void }) {
-  if (!node) return <section className="vmem-graph-panel" aria-label="Graph inspector"><h2>Inspector</h2><p>Select a note to inspect it.</p></section>;
+  if (!node) return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><p>Select a note to inspect it.</p></section>;
   const labels = new Map(model.nodes.map((item) => [item.id, item.label]));
   const related = model.edges.filter((edge) => edge.source === node.id || edge.target === node.id);
-  return <section className="vmem-graph-panel" aria-label="Graph inspector"><h2>Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}</section>;
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph inspector"><h2 className="vmem-card-title">Inspector</h2><h3>{node.label}</h3><dl><dt>Type</dt><dd>{node.type}</dd><dt>Domain</dt><dd>{node.domain ?? "None"}</dd><dt>Community</dt><dd>{node.community ?? "None"}</dd><dt>Visible links</dt><dd>{node.degree}</dd><dt>Path</dt><dd>{node.relPath ?? "Unresolved"}</dd></dl>{node.relPath && <button type="button" className="vmem-button" onClick={() => open(node.id)}>Open note</button>}<h3>Connections</h3><ul>{related.slice(0, 20).map((edge) => <li key={JSON.stringify([edge.source, edge.target, edge.relation])}>{labels.get(edge.source) ?? edge.source} → {labels.get(edge.target) ?? edge.target} ({edge.relation})</li>)}</ul>{related.length > 20 && <p>Showing 20 of {related.length} connections.</p>}</section>;
 }
 
-export function GraphInsightsPanel({ model, select }: { model: GraphModel; select(id: string): void }) {
+export function GraphInsightsPanel({ model, visibleIds, select }: { model: GraphModel; visibleIds: Set<string>; select(id: string): void }) {
   const [open, setOpen] = useState(false);
   const results = useMemo(() => open ? { orphans: findOrphans(model), bridges: findBridges(model), cross: findSurprisingConnections(model), hidden: model.edges.length <= LARGE_GRAPH_EDGES ? findHiddenLinks(model) : [] } : null, [model, open]);
   const labels = useMemo(() => new Map(model.nodes.map((node) => [node.id, node.label])), [model]);
   const label = (id: string) => labels.get(id) ?? id;
-  return <section className="vmem-graph-panel" aria-label="Graph insights"><h2>Insights</h2><button type="button" className="vmem-button" aria-expanded={open} aria-controls="vmem-graph-insights-results" onClick={() => setOpen(!open)}>{open ? "Hide insights" : "Show insights"}</button><div id="vmem-graph-insights-results">{results && <><h3>Orphan notes</h3><ul>{results.orphans.map((item) => <li key={item.id}><button type="button" className="vmem-button" onClick={() => select(item.id)}>{label(item.id)}</button></li>)}</ul><h3>Community bridges</h3><ul>{results.bridges.map((item) => <li key={item.id}><button type="button" className="vmem-button" onClick={() => select(item.id)}>{label(item.id)}</button> ({item.communityCount} communities)</li>)}</ul><h3>Cross-community connections</h3><ul>{results.cross.map((item) => <li key={`${item.source}:${item.target}`}>{label(item.source)} → {label(item.target)}</li>)}</ul><h3>Possible links</h3>{model.edges.length > LARGE_GRAPH_EDGES ? <p>Possible links are unavailable for large graphs. Narrow the graph with filters first.</p> : <ul>{results.hidden.map((item) => <li key={`${item.source}:${item.target}`}>{label(item.source)} ↔ {label(item.target)} ({item.shared} shared)</li>)}</ul>}</>}</div></section>;
+  return <section className="vmem-card vmem-graph-panel" aria-label="Graph insights"><h2 className="vmem-card-title">Insights</h2><button type="button" className="vmem-button" aria-expanded={open} aria-controls="vmem-graph-insights-results" onClick={() => setOpen(!open)}>{open ? "Hide insights" : "Show insights"}</button><div id="vmem-graph-insights-results">{results && <><h3>Orphan notes</h3><ul>{results.orphans.map((item) => <li key={item.id}><button type="button" className="vmem-button" disabled={!visibleIds.has(item.id)} title={!visibleIds.has(item.id) ? "Hidden by search" : undefined} onClick={() => select(item.id)}>{label(item.id)}</button></li>)}</ul><h3>Community bridges</h3><ul>{results.bridges.map((item) => <li key={item.id}><button type="button" className="vmem-button" disabled={!visibleIds.has(item.id)} title={!visibleIds.has(item.id) ? "Hidden by search" : undefined} onClick={() => select(item.id)}>{label(item.id)}</button> ({item.communityCount} communities)</li>)}</ul><h3>Cross-community connections</h3><ul>{results.cross.map((item) => <li key={`${item.source}:${item.target}`}>{label(item.source)} → {label(item.target)}</li>)}</ul><h3>Possible links</h3>{model.edges.length > LARGE_GRAPH_EDGES ? <p>Possible links are unavailable for large graphs. Narrow the graph with filters first.</p> : <ul>{results.hidden.map((item) => <li key={`${item.source}:${item.target}`}>{label(item.source)} ↔ {label(item.target)} ({item.shared} shared)</li>)}</ul>}</>}</div></section>;
 }

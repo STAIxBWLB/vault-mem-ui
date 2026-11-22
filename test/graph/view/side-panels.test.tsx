@@ -28,7 +28,7 @@ test("facet filters and search use the derived graph", () => {
   expect(markup).toContain("Domains");
   expect(markup).toContain("Relations");
   expect(markup).toContain("Community");
-  expect(renderToStaticMarkup(<GraphLegend state={store.getState()} />)).toContain("supports");
+  expect(renderToStaticMarkup(<GraphLegend state={store.getState()} />)).toContain("frontmatter links");
 });
 
 test("inspector reports selected metadata and visible relations", () => {

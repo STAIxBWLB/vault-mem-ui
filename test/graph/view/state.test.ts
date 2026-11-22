@@ -93,7 +93,7 @@ describe("graph view store", () => {
     store.select("e");
     store.hover("e");
     store.setProfile({ ...store.getState().profile, showUnresolved: false });
-    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: null });
+    expect(store.getState()).toMatchObject({ selectedId: null, hoverId: null, focusId: null, pathSourceId: "a" });
   });
 
   test("local view narrows to the neighbourhood and goes back to global", () => {
@@ -104,6 +104,44 @@ describe("graph view store", () => {
     store.openLocal(null);
     expect(store.getState().mode).toBe("global");
     expect(store.getState().derived.visibleNodeIds.size).toBe(5);
+  });
+
+  test("local centre survives selection, profile and search changes", () => {
+    const chain = buildGraphModel({
+      nodes: ["a", "b", "c", "d", "e"].map((id) => ({ id, label: id, relPath: `notes/${id}.md`, domain: id === "a" || id === "b" ? "x" : "y" })),
+      edges: [["a", "b"], ["b", "c"], ["c", "d"], ["d", "e"]].map(([source, target]) => ({ source: source!, target: target!, relation: "related", fromFrontmatter: false })),
+    }, 0);
+    const store = createGraphViewStore(chain);
+    store.openLocal("a", 1);
+    store.select("b");
+    store.setProfile({ ...store.getState().profile });
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+    store.setSearch("zzz");
+    store.setSearch("");
+    store.setProfile({ ...store.getState().profile });
+    expect(store.getState().localCenterId).toBe("a");
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+    store.openLocal("b", 1);
+    store.select("c");
+    store.setProfile({ ...store.getState().profile, domains: ["x"] });
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["a", "b"]);
+  });
+
+  test("a visible path source and path survive changes, but hidden edges clear them", () => {
+    const store = createGraphViewStore(model);
+    store.pathTo("a");
+    store.setSearch("notes/c");
+    expect(store.getState().pathSourceId).toBeNull();
+    store.setSearch("");
+    store.pathTo("b");
+    store.setSearch("notes/c");
+    expect(store.getState().pathSourceId).toBe("b");
+    store.pathTo("c");
+    expect(store.getState().path).toEqual(["b", "c"]);
+    store.setSearch("");
+    expect(store.getState().path).toEqual(["b", "c"]);
+    store.setProfile({ ...store.getState().profile, relations: ["wiki_link"] });
+    expect(store.getState()).toMatchObject({ pathSourceId: null, path: null });
   });
 
   test("shortest path picks a source, then finds the path or reports none", () => {
