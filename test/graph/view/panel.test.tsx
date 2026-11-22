@@ -120,6 +120,8 @@ describe("GraphPanel", () => {
     expect(calls).toHaveLength(0);
     act(() => root!.unmount()); root = null; container.remove();
     await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
+    expect(container.textContent).not.toContain("Semantic layout");
+    await act(async () => FakeWorker.last!.emit({ type: "ready" }));
     expect(container.textContent).toContain("Semantic layout");
     expect(calls).toHaveLength(0);
     await act(async () => fake.handlers.get("clickNode")!({ node: "a" })); await flush();
@@ -163,11 +165,15 @@ describe("GraphPanel", () => {
     await mount({ graph, enrichment: { model: "synthetic", embedded: 2, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: query });
     const first = FakeWorker.last!; await act(async () => { first.emit({ type: "ready" } as FromWorker); }); await flush();
     expect(calls).toHaveLength(0);
-    await act(async () => { [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!.click(); }); await flush();
+    const toggle = [...container.querySelectorAll("button")].find((button) => button.textContent === "Semantic layout")!;
+    await act(async () => { toggle.focus(); toggle.click(); }); await flush();
     const worker = FakeWorker.last!;
     expect(worker).not.toBe(first);
     expect(first.terminated).toBe(true);
     expect(fake.killed).toBe(false);
+    expect(toggle.isConnected).toBe(true);
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
     const init = worker.sent.find((message) => message.type === "init")!;
     if (init.type !== "init") throw new Error("missing worker init");
     expect([...init.graph.sources]).toEqual([0, 1, 0]);
@@ -217,8 +223,12 @@ describe("GraphPanel", () => {
   });
 
   test("semantic layout is unavailable without a worker", async () => {
-    const fake = fakeCanvas(); configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: async () => fake.deps });
+    const fake = fakeCanvas();
+    let ready: (deps: CanvasDeps) => void = () => {};
+    configureGraph({ moduleUrl: "x", workerAllowed: false, canvasDeps: () => new Promise((resolve) => { ready = resolve; }) });
     await mount({ graph, enrichment: { model: null, embedded: 0, total: 3 }, graphStats: { vault: "work", revision: "rev" } }, () => {}, undefined, { graphSnapshot: async () => ({}) });
+    expect(container.textContent).not.toContain("Semantic layout");
+    await act(async () => ready(fake.deps));
     await flush();
     expect(container.textContent).toContain("cached positions only");
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Semantic layout")).toBe(false);

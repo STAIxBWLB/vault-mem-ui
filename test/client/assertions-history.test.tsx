@@ -326,6 +326,9 @@ test("history: a refusal caused by a carried cursor offers a way back to the fir
   act(() => root.render(<HistoryView reply={refusal} params={{ path: "notes/a.md" }} navigate={navigate(navigations)} beginWrite={() => {}} />));
   expect(button("Start over")).toBeUndefined();
   expect(container.querySelector(".vmem-notice-err")?.textContent).toContain("not reachable from the vault HEAD");
+  act(() => root.render(<HistoryView reply={{ vault: null, path: "notes/a.md", history: null, changes: null, error: "unknown vault nope; pick a registered vault from Overview" }} params={{ vault: "nope", path: "notes/a.md", cursor: "c1" }} navigate={navigate(navigations)} beginWrite={() => {}} />));
+  expect(button("Start over")).toBeUndefined();
+  expect(container.textContent).toContain("unknown vault nope");
 });
 
 test("history: the changes between two revisions, paged, with deleted notes shown but not opened", () => {

@@ -114,6 +114,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
   const layoutRef = useRef<LayoutHandle | null>(null);
   const [canvasError, setCanvasError] = useState<string | null>(null);
   const [canvasReady, setCanvasReady] = useState(false);
+  const [layoutAvailable, setLayoutAvailable] = useState(false);
   const [semanticOn, setSemanticOn] = useState(false);
   const [semanticEdges, setSemanticEdges] = useState<SemanticEdge[] | null>(null);
   const [semanticError, setSemanticError] = useState<string | null>(null);
@@ -212,9 +213,10 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
       onError: (message) => { if (!cancelled) store.setLayout({ kind: "error", message }); },
     }).then((handle) => {
       if (cancelled) { if (handle.state === "running") handle.teardown(); return; }
-      if (handle.state === "cached-only") { setSemanticOn(false); store.setLayout({ kind: "cached-only", reason: handle.reason }); }
+      if (handle.state === "cached-only") { setLayoutAvailable(false); setSemanticOn(false); store.setLayout({ kind: "cached-only", reason: handle.reason }); }
       else {
         layoutRef.current = handle;
+        setLayoutAvailable(true);
         const drift = model.nodes.flatMap((node, index) => {
           const pinned = store.getState().pinned.has(node.id);
           if (pinned === (initialFixed[index] === 1)) return [];
@@ -303,7 +305,7 @@ function GraphCanvasView({ model, params, navigate, beginWrite, graphSnapshot, e
         <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
         <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>
-        {enrichment && graphSnapshot && state.layout.kind !== "cached-only" && <button type="button" className="vmem-button" aria-pressed={semanticOn} onClick={() => { setSemanticError(null); setSemanticOn(!semanticOn); }}>Semantic layout</button>}
+        {enrichment && graphSnapshot && layoutAvailable && <button type="button" className="vmem-button" aria-pressed={semanticOn} onClick={() => { setSemanticError(null); setSemanticOn(!semanticOn); }}>Semantic layout</button>}
         <button type="button" className="vmem-button" disabled={!selected} aria-pressed={state.pathSourceId !== null && !state.path} onClick={() => selected && store.pathTo(selected.id)}>
           {state.pathSourceId && !state.path ? "Path to…" : "Path from"}
         </button>

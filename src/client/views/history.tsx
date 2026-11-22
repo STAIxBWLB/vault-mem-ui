@@ -73,7 +73,7 @@ export function HistoryView({ reply, params, navigate }: ViewProps) {
   // refusal already names its cause and next step. A carried cursor is the one refusal the panel can undo by itself:
   // the next reload or poll lands on it again, so the way back to a clean first page is offered here.
   if (error && !reply.history) {
-    const stuck = str(params.cursor) || str(params.changesCursor);
+    const stuck = str(reply.vault) && (str(params.cursor) || str(params.changesCursor));
     return (
       <>
         <Notice tone="err">{error}</Notice>
