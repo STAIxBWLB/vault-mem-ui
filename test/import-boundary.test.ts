@@ -249,6 +249,13 @@ test("literal global owner keys and global destructuring cannot hide owner acces
   expect(boundaryViolations('globalThis["process"].env', "src/client/probe.ts")).toEqual([]);
 });
 
+test("parameter defaults check global destructuring without refusing plain object keys", () => {
+  for (const source of ['function f({ ["pro" + "cess"]: p } = globalThis) {}', 'const f = ({ [k]: p } = globalThis) => p', 'class C { f({ [k]: p } = globalThis) {} }', 'function f({ nested: { [k]: p } } = globalThis) {}', 'function f({ [k]: p } = (globalThis as any)) {}', '({ process: p } = globalThis)', '({ process: p } = other)']) {
+    expect({ source, refused: boundaryViolations(source, "src/client/probe.ts").length > 0 }).toEqual({ source, refused: true });
+  }
+  for (const source of ['const o = { process: 2, module: 1 }', 'const o = { "process": 1 }']) expect(boundaryViolations(source, "src/client/probe.ts")).toEqual([]);
+});
+
 test("unknown computed keys on known global and loader objects are refused throughout src", () => {
   for (const owner of ["process", "module", "globalThis", "self", "window", "global", "globalThis.self", 'globalThis["self"]', "globalThis.process", 'globalThis["module"]']) {
     const found = boundaryViolations(`const key = "safe"; ${owner}[key];`, "src/client/probe.ts");
