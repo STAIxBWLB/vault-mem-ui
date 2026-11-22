@@ -22,17 +22,20 @@ export interface SigmaLike {
   getNodeDisplayData(node: string): { x: number; y: number } | undefined;
   setSetting(key: string, value: unknown): unknown;
   refresh(opts?: { partialGraph?: { nodes?: string[]; edges?: string[] }; skipIndexation?: boolean; schedule?: boolean }): unknown;
+  /** Whether Sigma's program index covers every node and edge right now. A scheduled full refresh (window resize,
+   *  setSetting) empties it until its frame runs, and a skipIndexation repaint throws until then. */
+  hasProgramIndices(): boolean;
   kill(): void;
 }
 export interface GraphLike {
   addNode(id: string, attrs: Record<string, unknown>): unknown;
   addEdgeWithKey(key: string, source: string, target: string, attrs: Record<string, unknown>): unknown;
-  setNodeAttribute(id: string, name: string, value: unknown): unknown;
   hasNode(id: string): boolean;
-  setEdgeAttribute(key: string, name: string, value: unknown): unknown;
   getNodeAttribute(id: string, name: string): unknown;
   /** One pass over every node; graphology emits a single eachNodeAttributesUpdated that Sigma handles itself. */
   updateEachNodeAttributes(updater: (node: string, attrs: Record<string, unknown>) => Record<string, unknown>, hints?: { attributes?: string[] }): void;
+  /** One pass over every edge; graphology emits a single eachEdgeAttributesUpdated that Sigma handles itself. */
+  updateEachEdgeAttributes(updater: (key: string, attrs: Record<string, unknown>) => Record<string, unknown>, hints?: { attributes?: string[] }): void;
 }
 export interface CanvasDeps {
   createGraph(): GraphLike;
@@ -179,7 +182,12 @@ export function mountGraphCanvas(
   // Reducer-only repaint: re-run reducers and reprocess the programs for every node and edge without re-indexing
   // (Sigma's skipIndexation needs an explicit partialGraph; a bare refresh() always re-indexes everything).
   const everything = { nodes: model.nodes.map((n) => n.id), edges: model.edges.map((_, i) => `e${i}`) };
-  const repaint = () => sigma.refresh({ partialGraph: everything, skipIndexation: true, schedule: true });
+  const repaint = () => {
+    // A scheduled full refresh (window resize, setSetting) empties the program index until its frame runs, and
+    // skipIndexation throws on the first node then. Rebuild in the same call instead of waiting for that frame.
+    if (!sigma.hasProgramIndices()) { sigma.refresh(); return; }
+    sigma.refresh({ partialGraph: everything, skipIndexation: true, schedule: true });
+  };
   return {
     update(next) {
       const prev = state;
@@ -198,11 +206,15 @@ export function mountGraphCanvas(
         if (edge.source === next.hoverId) neighbours.add(edge.target);
         if (edge.target === next.hoverId) neighbours.add(edge.source);
       }
+      let settingsChanged = false;
       if (lodChanged) {
-        if (next.lod.labelDensity !== lastLod.labelDensity) sigma.setSetting("labelDensity", next.lod.labelDensity);
-        if (next.lod.renderLabels !== lastLod.renderLabels) sigma.setSetting("renderLabels", next.lod.renderLabels);
+        if (next.lod.labelDensity !== lastLod.labelDensity) { sigma.setSetting("labelDensity", next.lod.labelDensity); settingsChanged = true; }
+        if (next.lod.renderLabels !== lastLod.renderLabels) { sigma.setSetting("renderLabels", next.lod.renderLabels); settingsChanged = true; }
         lastLod = next.lod;
       }
+      // setSetting schedules a full refresh, which leaves the program index empty until its frame. Run that
+      // refresh synchronously so the reducers below (and the labels for the new LOD) are applied in this update.
+      if (settingsChanged) { sigma.refresh(); return; }
       // Hiding or showing nodes (local view) changes the label grid, which only a full refresh rebuilds.
       if (visibilityChanged) sigma.refresh();
       else repaint();
@@ -225,8 +237,18 @@ export function mountGraphCanvas(
     },
     refreshTheme() {
       refreshGraphTheme(container);
-      model.nodes.forEach((node) => graph.setNodeAttribute(node.id, "color", nodeColor(node, model.enriched, "neutral")));
-      model.edges.forEach((edge, index) => graph.setEdgeAttribute(`e${index}`, "color", edgeColor(edge, display)));
+      // Sigma's own graph listeners repaint an attributes batch with skipIndexation; rebuild first when a
+      // scheduled full refresh left the program index empty, or those repaints throw.
+      if (!sigma.hasProgramIndices()) sigma.refresh();
+      // One pass per kind: graphology emits one event each, which Sigma rewrites into the programs itself.
+      graph.updateEachNodeAttributes((node, attrs) => {
+        const n = nodeById.get(node);
+        return n ? { ...attrs, color: nodeColor(n, model.enriched, "neutral") } : attrs;
+      }, { attributes: ["color"] });
+      graph.updateEachEdgeAttributes((_key, attrs) => {
+        const edge = model.edges[attrs.index as number];
+        return edge ? { ...attrs, color: edgeColor(edge, display) } : attrs;
+      }, { attributes: ["color"] });
       sigma.refresh();
     },
     positionOf(id) {
@@ -238,11 +260,36 @@ export function mountGraphCanvas(
   };
 }
 
+/** Counts the keys of a Sigma index without materialising them (10k nodes / 100k edges in the supported size). */
+function indexSize(index: Record<string, unknown>): number {
+  let n = 0;
+  for (const key in index) { void key; n += 1; }
+  return n;
+}
+
+/**
+ * Sigma 3.0.3 keeps its program index in private fields and exposes no accessor; clearEdgeIndices replaces
+ * `edgeProgramIndex` with an empty object, and `process()` refills it one entry per node and edge. This is the one
+ * place that reads those fields; a Sigma without them answers false, which only costs a full refresh.
+ */
+function programIndicesCover(sigma: object, graph: object): boolean {
+  const s = sigma as { nodeProgramIndex?: Record<string, unknown>; edgeProgramIndex?: Record<string, unknown> };
+  const g = graph as { order?: number; size?: number };
+  if (!s.nodeProgramIndex || !s.edgeProgramIndex || g.order === undefined || g.size === undefined) return false;
+  return indexSize(s.nodeProgramIndex) === g.order && indexSize(s.edgeProgramIndex) === g.size;
+}
+
 /** Real Sigma and graphology, loaded on first use so module evaluation stays WebGL- and DOM-free. */
 export async function loadCanvasDeps(): Promise<CanvasDeps> {
   const [{ default: Sigma }, { MultiDirectedGraph }] = await Promise.all([import("sigma"), import("graphology")]);
   return {
     createGraph: () => new MultiDirectedGraph() as unknown as GraphLike,
-    createSigma: (g, c, s) => new Sigma(g as never, c, s as never) as unknown as SigmaLike,
+    createSigma: (g, c, s) => {
+      const sigma = new Sigma(g as never, c, s as never);
+      const like = sigma as unknown as SigmaLike;
+      // Sigma's constructor refreshes synchronously, so the index is populated by the time this returns.
+      like.hasProgramIndices = () => programIndicesCover(sigma, g);
+      return like;
+    },
   };
 }

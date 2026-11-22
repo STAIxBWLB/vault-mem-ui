@@ -33,6 +33,7 @@ afterEach(() => {
 interface Fake {
   deps: CanvasDeps;
   attrs: Map<string, Record<string, unknown>>;
+  edgeAttrs: Map<string, Record<string, unknown>>;
   settings: Record<string, unknown>;
   handlers: Map<string, (p: { node?: string }) => void>;
   refreshes: number;
@@ -40,14 +41,19 @@ interface Fake {
   edgeColors: Map<string, string>;
 }
 function fakeCanvas(): Fake {
-  const fake: Fake = { attrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
+  const fake: Fake = { attrs: new Map(), edgeAttrs: new Map(), settings: {}, handlers: new Map(), refreshes: 0, killed: false, edgeColors: new Map(), deps: null! };
   const graph: GraphLike = {
     addNode: (id, a) => fake.attrs.set(id, { ...a }),
-    addEdgeWithKey: () => undefined,
-    setNodeAttribute: (id, k, v) => { fake.attrs.get(id)![k] = v; },
+    addEdgeWithKey: (key, _s, _t, a) => fake.edgeAttrs.set(key, { ...a }),
     getNodeAttribute: (id, k) => fake.attrs.get(id)?.[k],
     updateEachNodeAttributes: (fn) => { for (const [id, a] of fake.attrs) fake.attrs.set(id, fn(id, a)); },
-    setEdgeAttribute: (key, k, v) => { fake.edgeColors.set(key, v as string); void k; },
+    updateEachEdgeAttributes: (fn) => {
+      for (const [key, a] of fake.edgeAttrs) {
+        const next = fn(key, a);
+        fake.edgeAttrs.set(key, next);
+        if (typeof next.color === "string") fake.edgeColors.set(key, next.color);
+      }
+    },
     hasNode: (id) => fake.attrs.has(id),
   };
   const sigma: SigmaLike = {
@@ -56,6 +62,7 @@ function fakeCanvas(): Fake {
     getNodeDisplayData: (id) => (fake.attrs.has(id) ? { x: 0, y: 0 } : undefined),
     setSetting: (k, v) => { fake.settings[k] = v; },
     refresh: () => { fake.refreshes += 1; },
+    hasProgramIndices: () => true,
     kill: () => { fake.killed = true; },
   };
   fake.deps = { createGraph: () => graph, createSigma: (_g, _c, s) => { Object.assign(fake.settings, s); return sigma; } };

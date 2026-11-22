@@ -27,8 +27,11 @@ graph.on("eachNodeAttributesUpdated", () => { events += 1; });
 const sigma: SigmaLike = {
   on: () => undefined,
   getCamera: () => ({ getState: () => ({ ratio: 1 }), on: () => undefined, animate: () => undefined }),
-  getNodeDisplayData: () => undefined, setSetting: () => undefined, kill: () => undefined,
+  getNodeDisplayData: () => undefined, kill: () => undefined,
+  // Sigma's setSetting calls scheduleRefresh(), i.e. a full re-index whose process() waits for the next frame.
+  setSetting: () => { full += 1; },
   refresh: (o) => { if (o?.partialGraph) light += 1; else full += 1; },
+  hasProgramIndices: () => true,
 };
 const store = createGraphViewStore(model);
 const canvas = mountGraphCanvas({} as HTMLElement, model, store.getState(), {}, { onHover: () => {}, onClick: () => {}, onCamera: () => {} },
@@ -49,5 +52,6 @@ time("batch: per-coordinate setNodeAttribute (before)", 10, () => {
 });
 time("batch: updateEachNodeAttributes (after)", 10, () => canvas.applyPositions(batch));
 time("zoom step, LOD unchanged (after)", 50, (i) => { store.setCamera(0.3 + (i % 5) * 0.01); canvas.update(store.getState()); });
+time("LOD flip (after)", 20, (i) => { store.setCamera(i % 2 === 0 ? 0.3 : 2); canvas.update(store.getState()); });
 time("iteration count change while running (after)", 50, (i) => { store.setLayout({ kind: "running", iterations: i + 1 }); canvas.update(store.getState()); });
 time("selection change (after)", 20, (i) => { store.select(`n${i}`); canvas.update(store.getState()); });

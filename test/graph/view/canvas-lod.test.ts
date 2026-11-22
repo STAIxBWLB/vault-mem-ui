@@ -15,12 +15,14 @@ function harness(input: GraphInput) {
   const graph: GraphLike = {
     addNode: () => undefined,
     addEdgeWithKey: (k, _s, _t, a) => { edges.push([k, a]); },
-    setNodeAttribute: () => undefined, getNodeAttribute: () => undefined, setEdgeAttribute: () => undefined, hasNode: () => true, updateEachNodeAttributes: () => undefined,
+    getNodeAttribute: () => undefined, hasNode: () => true,
+    updateEachNodeAttributes: () => undefined, updateEachEdgeAttributes: () => undefined,
   };
   const sigma: SigmaLike = {
     on: () => undefined,
     getCamera: () => ({ getState: () => ({ ratio: 1 }), on: () => undefined, animate: () => undefined }),
-    getNodeDisplayData: () => undefined, setSetting: () => undefined, refresh: () => undefined, kill: () => undefined,
+    getNodeDisplayData: () => undefined, setSetting: () => undefined, refresh: () => undefined,
+    hasProgramIndices: () => true, kill: () => undefined,
   };
   const deps: CanvasDeps = { createGraph: () => graph, createSigma: (_g, _c, s) => { settings = s; return sigma; } };
   const model = buildGraphModel(input, 0);
