@@ -39,7 +39,10 @@ describe("parseMarkdown", () => {
     expect(html("# title ###")).toContain(">title</h2>");
     expect(html("# title###")).toContain(">title###</h2>");
     expect(html("# foo # ")).toContain(">foo #</h2>");
-    expect(parseMarkdown("#    #")[0]).toEqual({ kind: "heading", depth: 1, children: [] });
+    for (const input of ["# #", "#  #", "#    #", "# \t#", "##\t #", " #  # "]) {
+      const depth = input.trimStart().startsWith("##") ? 2 : 1;
+      expect(parseMarkdown(input)[0]).toEqual({ kind: "heading", depth, children: [{ kind: "text", text: "#" }] });
+    }
     expect(parseInline("``x`y`")).toEqual([{ kind: "text", text: "`" }, { kind: "code", text: "x" }, { kind: "text", text: "y`" }]);
   });
 

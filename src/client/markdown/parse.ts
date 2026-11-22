@@ -112,11 +112,13 @@ function parseBlocks(lines: string[], depth: number): Block[] {
     const atx = ATX.exec(line);
     if (atx) {
       let heading = atx[2] ?? "";
+      let start = 0;
+      while (start < heading.length && (heading[start] === " " || heading[start] === "\t")) start++;
       let end = heading.length;
       while (end > 0 && (heading[end - 1] === " " || heading[end - 1] === "\t")) end--;
       const trailing = end;
       while (end > 0 && heading[end - 1] === "#") end--;
-      if (end < trailing && end > 0 && (heading[end - 1] === " " || heading[end - 1] === "\t")) heading = heading.slice(0, end);
+      if (end < trailing && end > start && (heading[end - 1] === " " || heading[end - 1] === "\t")) heading = heading.slice(0, end);
       heading = heading.trim();
       blocks.push({ kind: "heading", depth: atx[1]!.length, children: parseInline(heading) });
       at += 1;
