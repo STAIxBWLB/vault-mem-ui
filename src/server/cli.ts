@@ -6,7 +6,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import plugin from "@staix/vault-mem/ui-plugin";
-import { graphProvider, withGraphPanel } from "../plugin/graph.ts";
+import { graphProvider, implementedPanelManifest } from "../plugin/graph.ts";
 import { DEFAULT_IDLE_MS, startHost, type ClientAssets, type Host } from "./host.ts";
 
 export interface RunOptions {
@@ -66,7 +66,7 @@ export async function run(options: RunOptions): Promise<Host | null> {
   let host: Host;
   try {
     host = startHost({
-      provider: graphProvider(provider), manifest: withGraphPanel(plugin.manifest), assets: options.assets, port: parsed.port, idleMs: parsed.idleMs,
+      provider: graphProvider(provider), manifest: implementedPanelManifest(plugin.manifest), assets: options.assets, port: parsed.port, idleMs: parsed.idleMs,
       log: (line) => options.err(line),
       onIdle: () => {
         options.out(`vmem-ui: no requests for ${parsed.idleMs / 60_000} minutes; stopped. Run vmem-ui again to reopen.`);

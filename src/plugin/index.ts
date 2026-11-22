@@ -8,10 +8,10 @@
 import type { ConsoleContext, ConsolePlugin, ConsoleProvider } from "@staix/agent-console/contract";
 import { plugin as vaultPlugin } from "@staix/vault-mem/ui-plugin";
 import { panelAssets } from "./assets.ts";
-import { graphProvider, withGraphPanel } from "./graph.ts";
+import { graphProvider, implementedPanelManifest } from "./graph.ts";
 
 export const plugin: ConsolePlugin = {
-  manifest: withGraphPanel(vaultPlugin.manifest),
+  manifest: implementedPanelManifest(vaultPlugin.manifest),
   async open(ctx: ConsoleContext): Promise<ConsoleProvider> {
     const provider = await vaultPlugin.open(ctx);
     // Every member is forwarded through a call, so a member the provider binds to its own instance keeps working.

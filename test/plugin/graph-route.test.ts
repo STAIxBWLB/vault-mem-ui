@@ -10,8 +10,15 @@ import type { ConsolePanelManifest, ConsoleProvider } from "@staix/agent-console
 import { declaresPanel, manifestProblems, providerProblems } from "../../node_modules/@staix/agent-console/src/plugins.ts";
 import { GRAPH_UNAVAILABLE, graphAwareSnapshot, graphProvider, withGraphPanel } from "../../src/plugin/graph.ts";
 import { plugin } from "../../src/plugin/index.ts";
+import { PANEL_IDS } from "../../src/client/prefs.ts";
 import { run } from "../../src/server/cli.ts";
-import type { Host } from "../../src/server/host.ts";
+import { allowedPanels, type Host } from "../../src/server/host.ts";
+
+test("the declared panels match the implemented views and standalone routing", () => {
+  const declared = plugin.manifest.panels.map((panel) => panel.id);
+  expect(new Set(declared)).toEqual(new Set(PANEL_IDS));
+  expect(allowedPanels(plugin.manifest)).toEqual(new Set([...declared, "inbox", "search"]));
+});
 
 test("the plugin manifest declares graph, and acon's router accepts it", () => {
   expect(plugin.manifest.panels.map((p) => p.id)).toContain("graph");
@@ -67,7 +74,12 @@ test("the standalone command routes graph to the unavailable reply", async () =>
   const signedIn = await fetch(host!.issue(), { redirect: "manual" });
   const cookie = signedIn.headers.get("set-cookie")!.split(";")[0]!;
   const manifest = await (await fetch(host!.origin + "/api/manifest", { headers: { cookie } })).json() as { panels: { id: string }[] };
-  expect(manifest.panels.map((p) => p.id)).toContain("graph");
+  expect(new Set(manifest.panels.map((p) => p.id))).toEqual(new Set(PANEL_IDS));
+  const refused = await fetch(host!.origin + "/api/snapshot", {
+    method: "POST", headers: { cookie, origin: host!.origin, "content-type": "application/json" }, body: JSON.stringify({ panel: "settings" }),
+  });
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ error: expect.stringMatching(/unknown panel/i) });
   const res = await fetch(host!.origin + "/api/snapshot", {
     method: "POST", headers: { cookie, origin: host!.origin, "content-type": "application/json" }, body: JSON.stringify({ panel: "graph" }),
   });
