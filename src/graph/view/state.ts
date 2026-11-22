@@ -4,14 +4,14 @@
 
 import { applyGraphSearch, deriveGraphView, type DerivedGraph } from "../derive";
 import { shortestPath } from "../insights";
-import { buildAdjacency, graphEdgeVisibilityKey, type GraphModel } from "../model";
+import { buildAdjacency, graphEdgeVisibilityKey, withGraphDegrees, type GraphModel } from "../model";
 import { graphTopologySignature } from "../style";
 import type { GraphFilterProfile } from "../types";
 import type { LayoutGraph } from "../layout/protocol";
 import { readLayoutCache, writeLayoutCache, type CacheStorage } from "./cache";
 import { lodFor, type Lod } from "./lod";
 
-export type ViewMode = "global" | "local";
+export type ViewMode = "global" | "local" | "chains";
 export type LayoutStatus =
   | { kind: "idle" }
   | { kind: "running"; iterations: number }
@@ -34,6 +34,7 @@ export interface GraphViewState {
   pathTargetId: string | null;
   path: string[] | null;
   pathMissing: boolean;
+  chainFocusIds: Set<string>;
   colorByCommunity: boolean;
   pinned: Set<string>;
   layout: LayoutStatus;
@@ -59,6 +60,9 @@ export interface GraphViewStore {
   hover(id: string | null): void;
   /** Local view around a node; null goes back to the global view. */
   openLocal(id: string | null, depth?: 1 | 2 | 3): void;
+  setMode(mode: "global" | "chains"): void;
+  focusChain(ids: string[]): void;
+  clearChainFocus(): void;
   /** First call picks the source, second finds the path; a call with null clears it. */
   pathTo(id: string | null): void;
   togglePin(id: string): void;
@@ -81,14 +85,22 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
   const cacheKey = graphTopologySignature(model.nodes, model.edges);
   const cached = readLayoutCache(options.storage, cacheKey);
   const ids = new Set(model.nodes.map((n) => n.id));
-  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3, profile: GraphFilterProfile) => deriveGraphView({
-    model, profile, generatedPatterns: [], mode, focusNodeId: focusId,
-    localDepth: depth, localDirection: "both", search: "", searchAsFilter: false,
-  });
+  const derive = (mode: ViewMode, focusId: string | null, depth: 1 | 2 | 3, profile: GraphFilterProfile): DerivedGraph => {
+    const base = deriveGraphView({ model, profile, generatedPatterns: [], mode: mode === "chains" ? "global" : mode, focusNodeId: focusId,
+      localDepth: depth, localDirection: "both", search: "", searchAsFilter: false });
+    if (mode !== "chains") return base;
+    const nodes = base.analysisModel.nodes.filter((node) => node.type === "decision");
+    const ids = new Set(nodes.map((node) => node.id));
+    const edges = base.analysisModel.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target) && (edge.relation === "supersedes" || edge.relation === "superseded_by"));
+    const graph = withGraphDegrees({ ...base.analysisModel, nodes, edges });
+    const neighbors = buildAdjacency(graph);
+    return { ...base, analysisModel: graph, visibleModel: graph, visibleNodeIds: ids, visibleEdgeKeys: new Set(edges.map(graphEdgeVisibilityKey)),
+      visibleNeighborCounts: new Map([...neighbors].map(([id, adjacent]) => [id, adjacent.size])), emptyReason: nodes.length ? null : "filtered-empty" };
+  };
   let analysis = derive("global", null, 2, OPEN_PROFILE);
   let state: GraphViewState = {
     mode: "global", focusId: null, localCenterId: null, localDepth: 2, selectedId: null, hoverId: null,
-    pathSourceId: null, pathTargetId: null, path: null, pathMissing: false, colorByCommunity: model.enriched,
+    pathSourceId: null, pathTargetId: null, path: null, pathMissing: false, chainFocusIds: new Set(), colorByCommunity: model.enriched,
     pinned: new Set(cached.pinned.filter((id) => ids.has(id))),
     layout: { kind: "idle" }, cameraRatio: 1,
     profile: { ...OPEN_PROFILE }, search: "",
@@ -117,12 +129,13 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
     const selectedId = has(state.selectedId) ? state.selectedId : null;
     const hoverId = has(state.hoverId) ? state.hoverId : null;
     const focusId = has(state.focusId) ? state.focusId : null;
+    const chainFocusIds = [...state.chainFocusIds].every(has) ? state.chainFocusIds : new Set([...state.chainFocusIds].filter(has));
     const source = state.pathSourceId, target = state.pathTargetId;
     if (!has(source) || (target !== null && !has(target))) {
-      return { derived, selectedId, hoverId, focusId, pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
+      return { derived, selectedId, hoverId, focusId, chainFocusIds, pathSourceId: null, pathTargetId: null, path: null, pathMissing: false };
     }
     const path = source && target ? shortestPath(derived.visibleModel, source, target) : null;
-    return { derived, selectedId, hoverId, focusId, pathSourceId: source, pathTargetId: target,
+    return { derived, selectedId, hoverId, focusId, chainFocusIds, pathSourceId: source, pathTargetId: target,
       path, pathMissing: target !== null && path === null };
   };
 
@@ -138,8 +151,18 @@ export function createGraphViewStore(model: GraphModel, options: { storage?: Cac
       const mode: ViewMode = id === null ? "global" : "local";
       analysis = derive(mode, id, depth, state.profile);
       const derived = applyGraphSearch(analysis, state.search);
-      set({ ...reconcile(derived), mode, focusId: id, localCenterId: id, localDepth: depth, selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
+      set({ ...reconcile(derived), mode, focusId: id, localCenterId: id, localDepth: depth, chainFocusIds: new Set(), selectedId: id ?? (state.selectedId && derived.visibleNodeIds.has(state.selectedId) ? state.selectedId : null) });
     },
+    setMode(mode) {
+      analysis = derive(mode, null, state.localDepth, state.profile);
+      set({ ...reconcile(applyGraphSearch(analysis, state.search)), mode, localCenterId: null, chainFocusIds: new Set() });
+    },
+    focusChain(ids) {
+      const visibleIds = ids.filter((id) => state.derived.visibleNodeIds.has(id));
+      if (!visibleIds.length) return;
+      set({ chainFocusIds: new Set(visibleIds), selectedId: visibleIds[0]!, focusId: visibleIds[0]! });
+    },
+    clearChainFocus() { set({ chainFocusIds: state.chainFocusIds.size ? new Set() : state.chainFocusIds, selectedId: null, focusId: null }); },
     pathTo(id) {
       if (id === null) return set({ pathSourceId: null, pathTargetId: null, path: null, pathMissing: false });
       if (!known(id) || !visible(id)) return;

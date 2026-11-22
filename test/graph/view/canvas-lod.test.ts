@@ -6,6 +6,7 @@ import { mountGraphCanvas, type CanvasDeps, type GraphLike, type SigmaLike } fro
 import { LOD_EDGE_STRIDE, LOD_EDGE_THRESHOLD } from "../../../src/graph/view/lod";
 import { createGraphViewStore } from "../../../src/graph/view/state";
 import type { GraphInput } from "../../../src/graph/types";
+import { graphTheme } from "../../../src/graph/style";
 
 type Reducer = (key: string, data: Record<string, unknown>) => Record<string, unknown>;
 
@@ -29,7 +30,9 @@ function harness(input: GraphInput) {
   const store = createGraphViewStore(model);
   const canvas = mountGraphCanvas({} as HTMLElement, model, store.getState(), {}, { onHover: () => {}, onClick: () => {}, onCamera: () => {} }, deps);
   const visible = () => edges.filter(([k, a]) => !(settings.edgeReducer as Reducer)(k, a).hidden).map(([, a]) => a.index as number);
-  return { store, canvas, visible };
+  const node = (id: string) => (settings.nodeReducer as Reducer)(id, { size: 5, color: "base" });
+  const edge = (index: number) => (settings.edgeReducer as Reducer)(edges[index]![0], edges[index]![1]);
+  return { store, canvas, visible, node, edge };
 }
 
 // A star with LOD_EDGE_THRESHOLD + 1 edges, so LOD applies.
@@ -55,4 +58,19 @@ test("a reduced view draws a stride sample but keeps edges the person is looking
   store.setLayout({ kind: "settled", iterations: 2 });
   canvas.update(store.getState());
   expect(visible()).toHaveLength(star.edges.length);
+});
+
+test("chain mode keeps every supersedes edge and highlights the selected chain", () => {
+  const count = 1000, edgeCount = LOD_EDGE_THRESHOLD + 1;
+  const input: GraphInput = {
+    nodes: Array.from({ length: count }, (_, i) => ({ id: `n${i}`, label: `N${i}`, relPath: `notes/n${i}.md`, type: "decision" })),
+    edges: Array.from({ length: edgeCount }, (_, i) => ({ source: `n${i % count}`, target: `n${(i % count + Math.floor(i / count) + 1) % count}`, relation: "supersedes", fromFrontmatter: true })),
+  };
+  const { store, canvas, visible, node, edge } = harness(input);
+  store.setMode("chains"); canvas.update(store.getState());
+  expect(visible()).toHaveLength(edgeCount);
+  store.focusChain(["n0", "n1", "n2"]); canvas.update(store.getState());
+  expect(node("n500").color).toBe(graphTheme().dimNode);
+  expect(edge(1).color).toBe(graphTheme().accent);
+  expect(edge(1).hidden).not.toBe(true);
 });

@@ -1,13 +1,49 @@
 /** Read-only controls adapted from STAIxBWLB/maru@b33341df src/components/graph/GraphFilterPanel, GraphLegend, GraphInspector and GraphInsightsPanel. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { findBridges, findHiddenLinks, findOrphans, findSurprisingConnections } from "../insights";
+import { buildDecisionChains } from "../decisionChains";
 import type { GraphModel, GraphNode } from "../model";
-import { GRAPH_SEARCH_LIMIT, rankGraphSearch } from "../search";
+import { GRAPH_SEARCH_LIMIT, graphSearchRank, rankGraphSearch } from "../search";
 import { communityColor, refreshGraphTheme } from "../style";
 import type { GraphFilterProfile } from "../types";
 import { LARGE_GRAPH_EDGES } from "../layout/protocol";
 import type { GraphViewState, GraphViewStore } from "./state";
 import { OPEN_PROFILE } from "./state";
+
+/** Chain groups use the existing maru-derived decisionChains.ts model. */
+const CHAIN_LIST_LIMIT = 50;
+export const GraphChainsPanel = memo(function GraphChainsPanel({ model, visibleIds, chainFocusIds, hasSupersedes, search = "", focus, open }: { model: GraphModel; visibleIds: Set<string>; chainFocusIds: Set<string>; hasSupersedes: boolean; search?: string; focus(ids: string[]): void; open(id: string): void }) {
+  const layout = useMemo(() => buildDecisionChains(model), [model]);
+  const shown = useMemo(() => {
+    let chains = layout.chains.filter((chain) => chain.nodes.some((node) => visibleIds.has(node.id)));
+    let isolated = layout.isolated.filter((node) => visibleIds.has(node.id));
+    if (search.trim()) {
+      const rank = (node: GraphNode) => visibleIds.has(node.id) ? graphSearchRank(node, search) ?? Infinity : Infinity;
+      const best = (nodes: GraphNode[]) => nodes.reduce((value, node) => Math.min(value, rank(node)), Infinity);
+      chains = chains.map((chain) => ({ chain, rank: best(chain.nodes) })).sort((a, b) => a.rank - b.rank).map((item) => item.chain);
+      isolated = isolated.map((node) => ({ node, rank: rank(node) })).sort((a, b) => a.rank - b.rank).map((item) => item.node);
+    }
+    return { chains, isolated };
+  }, [layout, visibleIds, search]);
+  return <section className="vmem-card vmem-graph-panel" aria-label="Decision chains">
+    <h2 className="vmem-card-title">Decision chains</h2>
+    {!hasSupersedes && <p>The provider's graph does not carry supersedes edges yet (STAIxBWLB/vault-mem#294). Chains will appear when the provider supplies them; nothing to do now.</p>}
+    {shown.chains.length === 0 && <p>No linked decision chains in the current graph.</p>}
+    {shown.chains.length > CHAIN_LIST_LIMIT && <p>Showing {CHAIN_LIST_LIMIT} of {shown.chains.length} chains; search or filter to narrow.</p>}
+    <ol>{shown.chains.slice(0, CHAIN_LIST_LIMIT).map((chain) => {
+      const ids = chain.nodes.map((node) => node.id), visible = ids.filter((id) => visibleIds.has(id));
+      const selected = visible.length > 0 && visible.length === chainFocusIds.size && visible.every((id) => chainFocusIds.has(id));
+      const label = chain.nodes.slice(0, 3).map((node) => node.label).join(" → ");
+      const members = chain.nodes.length > CHAIN_LIST_LIMIT ? [...chain.nodes.filter((node) => visibleIds.has(node.id)), ...chain.nodes.filter((node) => !visibleIds.has(node.id))] : chain.nodes;
+      return <li key={JSON.stringify(ids)}><button type="button" className="vmem-button" aria-pressed={selected} onClick={() => focus(visible)}>Focus chain: {label}{ids.length > 3 ? " ..." : ""}</button>
+        {visible.length !== ids.length && <span> {visible.length} of {ids.length} visible</span>}
+        <ul>{members.slice(0, CHAIN_LIST_LIMIT).map((node) => <li key={node.id}><button type="button" className="vmem-button" disabled={!node.relPath} onClick={() => open(node.id)}>Open {node.label}</button>{node.date ? ` (${node.date})` : ""}</li>)}</ul>
+        {ids.length > CHAIN_LIST_LIMIT && <p>Showing {CHAIN_LIST_LIMIT} of {ids.length} decisions, visible first.</p>}
+      </li>;
+    })}</ol>
+    {shown.isolated.length > 0 && <><h3>Unlinked decisions</h3>{shown.isolated.length > CHAIN_LIST_LIMIT && <p>Showing {CHAIN_LIST_LIMIT} of {shown.isolated.length} unlinked decisions; search or filter to narrow.</p>}<ul>{shown.isolated.slice(0, CHAIN_LIST_LIMIT).map((node) => <li key={node.id}><button type="button" className="vmem-button" aria-pressed={chainFocusIds.size === 1 && chainFocusIds.has(node.id)} onClick={() => focus([node.id])}>Focus {node.label}</button> <button type="button" className="vmem-button" disabled={!node.relPath} onClick={() => open(node.id)}>Open {node.label}</button></li>)}</ul></>}
+  </section>;
+});
 
 function Facet({ label, items, values, update }: { label: string; items: { value: string; count: number }[]; values: string[]; update(values: string[]): void }) {
   return <fieldset className="vmem-graph-facet"><legend>{label}</legend>{items.map((item) => <label key={item.value} className="vmem-graph-option"><input type="checkbox" checked={values.includes(item.value)} onChange={() => update(values.includes(item.value) ? values.filter((v) => v !== item.value) : [...values, item.value])} /> {item.value} ({item.count})</label>)}</fieldset>;

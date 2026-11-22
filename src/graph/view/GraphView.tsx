@@ -13,7 +13,7 @@ import type { GraphInput } from "../types";
 import { hashPosition, loadCanvasDeps, mountGraphCanvas, type CanvasDeps, type GraphCanvasHandle } from "./canvas";
 import type { CacheStorage } from "./cache";
 import { LOD_EDGE_THRESHOLD } from "./lod";
-import { GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend } from "./SidePanels";
+import { GraphChainsPanel, GraphFilterPanel, GraphInspector, GraphInsightsPanel, GraphLegend } from "./SidePanels";
 import { createGraphViewStore, type GraphViewStore, type LayoutStatus } from "./state";
 
 /** A GraphInput when `value` has the shape; anything else is null (the panel then explains why there is no graph).
@@ -89,6 +89,7 @@ export function GraphPanel({ reply, params, navigate, theme }: ViewProps) {
 
 function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphModel; params: Record<string, string>; navigate: ViewProps["navigate"]; themeKey: string }) {
   const store = useMemo<GraphViewStore>(() => createGraphViewStore(model, { storage: env.storage ?? browserStorage() }), [model]);
+  const hasSupersedes = useMemo(() => model.edges.some((edge) => edge.relation === "supersedes" || edge.relation === "superseded_by"), [model]);
   const subscribe = useCallback((listener: () => void) => store.subscribe(listener), [store]);
   const state = useSyncExternalStore(subscribe, store.getState, store.getState);
   const selectedTextId = useId();
@@ -198,23 +199,25 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
     else if (key === "Enter" && state.selectedId) openNote(state.selectedId);
     else if (key === "l" && state.selectedId) store.openLocal(state.selectedId);
     else if (key === "p" && state.selectedId) store.pathTo(state.selectedId);
-    else if (key === "Escape") { store.pathTo(null); store.openLocal(null); store.select(null); }
+    else if (key === "Escape") { store.pathTo(null); if (state.mode === "chains") store.clearChainFocus(); else { store.openLocal(null); store.select(null); } }
     else return;
     event.preventDefault();
     const id = store.getState().selectedId;
     if (id && key.startsWith("Arrow")) canvasRef.current?.focusNode(id);
   };
-  const openNote = (id: string) => {
+  const openNote = useCallback((id: string) => {
     const node = model.nodes.find((n) => n.id === id);
     if (node?.relPath) navigate("note", { path: node.relPath, ...vaultParam(params) });
-  };
+  }, [model, navigate, params]);
+  const focusChain = useCallback((ids: string[]) => { store.focusChain(ids); canvasRef.current?.focusNodes(ids); }, [store]);
 
   return (
     <section className="vmem-graph" aria-label="Vault graph">
       <div className="vmem-graph-bar" role="toolbar" aria-label="Graph controls">
         <span className="vmem-sub">{state.derived.visibleModel.nodes.length} notes · {state.derived.visibleModel.edges.length} links{model.edges.length > LOD_EDGE_THRESHOLD ? " · large graph, detail reduced while moving" : ""}</span>
-        {state.mode === "local" ? <button type="button" className="vmem-button" onClick={() => store.openLocal(null)}>Global view</button> : null}
-        <button type="button" className="vmem-button" disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
+        <button type="button" className="vmem-button" aria-pressed={state.mode === "global"} onClick={() => store.setMode("global")}>Global view</button>
+        <button type="button" className="vmem-button" aria-pressed={state.mode === "local"} disabled={!selected} onClick={() => selected && store.openLocal(selected.id)}>Local view</button>
+        <button type="button" className="vmem-button" aria-pressed={state.mode === "chains"} onClick={() => store.setMode("chains")}>Decision chains</button>
         <button type="button" className="vmem-button" disabled={!selected} aria-pressed={state.pathSourceId !== null && !state.path} onClick={() => selected && store.pathTo(selected.id)}>
           {state.pathSourceId && !state.path ? "Path to…" : "Path from"}
         </button>
@@ -236,6 +239,7 @@ function GraphCanvasView({ model, params, navigate, themeKey }: { model: GraphMo
         onKeyDown={onKey}
       />
       <aside className="vmem-graph-sidebar" aria-label="Graph details">
+        {state.mode === "chains" && <GraphChainsPanel model={model} visibleIds={state.derived.visibleNodeIds} chainFocusIds={state.chainFocusIds} hasSupersedes={hasSupersedes} search={state.search} focus={focusChain} open={openNote} />}
         <GraphFilterPanel state={state} store={store} />
         <GraphLegend state={state} themeKey={themeKey} />
         <GraphInspector node={state.derived.visibleModel.nodes.find((node) => node.id === state.selectedId) ?? null} model={state.derived.visibleModel} open={openNote} />

@@ -59,6 +59,42 @@ describe("layout cache", () => {
 describe("graph view store", () => {
   const model = buildGraphModel(input, 0);
 
+  test("chain mode keeps only decisions and supersedes edges and focuses a chain", () => {
+    const chainModel = buildGraphModel({ nodes: [
+      { id: "d1", label: "First", relPath: "notes/d1.md", type: "decision", date: "2025-01-01" },
+      { id: "d2", label: "Second", relPath: "notes/d2.md", type: "decision", date: "2026-01-01" },
+      { id: "d3", label: "Solo", relPath: "notes/d3.md", type: "decision" },
+      { id: "n", label: "Other", relPath: "notes/n.md", type: "insight" },
+    ], edges: [
+      { source: "d1", target: "d2", relation: "supersedes", fromFrontmatter: true },
+      { source: "d1", target: "d2", relation: "wiki_link", fromFrontmatter: false },
+      { source: "d2", target: "n", relation: "wiki_link", fromFrontmatter: false },
+    ] });
+    const store = createGraphViewStore(chainModel);
+    store.setMode("chains");
+    expect([...store.getState().derived.visibleNodeIds].sort()).toEqual(["d1", "d2", "d3"]);
+    expect(store.getState().derived.visibleModel.edges.map((edge) => edge.relation)).toEqual(["supersedes"]);
+    const unfocused = store.getState().chainFocusIds;
+    store.setProfile({ ...store.getState().profile });
+    expect(store.getState().chainFocusIds).toBe(unfocused);
+    store.clearChainFocus();
+    expect(store.getState().chainFocusIds).toBe(unfocused);
+    store.focusChain(["d1", "d2"]);
+    expect(store.getState().chainFocusIds).toEqual(new Set(["d1", "d2"]));
+    expect(store.getState().selectedId).toBe("d1");
+    store.setSearch("Solo");
+    expect(store.getState().chainFocusIds.size).toBe(0);
+    store.setSearch("");
+    store.focusChain(["d1", "d2"]);
+    store.clearChainFocus();
+    expect(store.getState()).toMatchObject({ selectedId: null, focusId: null });
+    expect(store.getState().chainFocusIds.size).toBe(0);
+    store.focusChain(["d1", "d2"]);
+    store.setMode("global");
+    expect(store.getState().derived.visibleNodeIds.size).toBe(4);
+    expect(store.getState().chainFocusIds.size).toBe(0);
+  });
+
   test("selection ignores ids that are not in the graph", () => {
     const store = createGraphViewStore(model);
     store.select("zzz");
